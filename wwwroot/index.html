@@ -1,0 +1,5 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiniRBAC</title><style>:root{color-scheme:light dark}body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.6}code{background:rgba(127,127,127,.15);padding:1px 5px;border-radius:4px}.muted{opacity:.7}</style></head>
+<body><h1>MiniRBAC</h1><p class="muted">Phân quyền tập trung (convert Sys_Access): role / permission / grant / assign + check API cho cả fleet. Mô hình ALLOW: chưa grant = chặn.</p>
+<ul><li><code>POST/GET /api/roles</code> · <code>POST/GET /api/permissions</code></li><li><code>POST /api/roles/{code}/grant|revoke</code></li><li><code>POST /api/users/{user}/assign|unassign</code> · <code>GET /api/users/{user}/permissions</code></li><li><code>GET /api/check?user=&permission=</code> → allowed</li></ul>
+<p class="muted">SSO <code>/api/whoami</code>. Swagger <a href="/swagger">/swagger</a>.</p></body></html>
