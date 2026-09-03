@@ -112,6 +112,34 @@ app.MapGet("/api/users/{userKey}/permissions", async (string userKey, IRbacServi
 app.MapGet("/api/check", async (string user, string permission, IRbacService svc) =>
     Results.Ok(await svc.CheckAsync(user, permission))).RequireAuthorization();
 
+// Import hàng loạt Role thật từ Sys_Group + gán UserRole thật cho user có FlagSysAdmin/FlagSysViewer
+// (SQL nguồn 2010.HTC). Sys_Function ở nguồn RỖNG (0 dòng) nên KHÔNG import Permission/RolePermission —
+// không suy diễn dữ liệu không có thật.
+app.MapPost("/api/import/roles", async (List<CodeNameDto> rows, IRbacService svc) =>
+{
+    if (rows is null || rows.Count == 0) return Results.BadRequest(new { error = "Không có dữ liệu import." });
+    int n = 0;
+    foreach (var r in rows)
+    {
+        if (string.IsNullOrWhiteSpace(r.Code) || string.IsNullOrWhiteSpace(r.Name)) continue;
+        await svc.AddRoleAsync(r.Code, r.Name); n++;
+    }
+    return Results.Ok(new { imported = n, total = rows.Count });
+}).RequireAuthorization();
+
+app.MapPost("/api/import/userroles", async (List<ImportUserRoleDto> rows, IRbacService svc) =>
+{
+    if (rows is null || rows.Count == 0) return Results.BadRequest(new { error = "Không có dữ liệu import." });
+    int n = 0;
+    foreach (var r in rows)
+    {
+        if (string.IsNullOrWhiteSpace(r.UserCode)) continue;
+        if (r.FlagSysAdmin == "1") { await svc.AddRoleAsync("SYSADMIN", "Quản trị hệ thống (Sys_Access)"); await svc.AssignAsync(r.UserCode, "SYSADMIN"); n++; }
+        if (r.FlagSysViewer == "1") { await svc.AddRoleAsync("SYSVIEWER", "Xem hệ thống (Sys_Access)"); await svc.AssignAsync(r.UserCode, "SYSVIEWER"); n++; }
+    }
+    return Results.Ok(new { assigned = n, total = rows.Count });
+}).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });
@@ -123,3 +151,4 @@ app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 app.Run();
 
 record RegisterOrgDto(string Name);
+record ImportUserRoleDto(string? UserCode, string? FlagSysAdmin, string? FlagSysViewer);
