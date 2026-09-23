@@ -179,6 +179,23 @@ app.MapPost("/api/teams", async (UserTeamDto d, IRbacService svc) =>
 app.MapGet("/api/teams", async (string? dealerCode, bool? activeOnly, IRbacService svc) =>
     Results.Ok(await svc.ListTeamsAsync(dealerCode, activeOnly))).RequireAuthorization();
 
+// Sys_UserTeam_Create (nguồn 2010.HTC): TẠO đội mới — TeamCode bắt buộc + (TeamCode,DealerCode) CHƯA tồn tại,
+// TeamName bắt buộc, DealerCode phải tồn tại + đang hoạt động. Khác POST /api/teams (AddTeamAsync upsert).
+app.MapPost("/api/teams/create", async (UserTeamDto d, IRbacService svc) =>
+    Results.Ok(await svc.CreateTeamAsync(d))).RequireAuthorization();
+
+// Sys_UserTeam_Update (nguồn 2010.HTC): cập nhật đội (partial theo Ft_Cols_Upd) — đội phải tồn tại,
+// TeamName bắt buộc khi cập nhật.
+app.MapPut("/api/teams/{teamCode}/{dealerCode}", async (string teamCode, string dealerCode, UpdateTeamDto d, IRbacService svc) =>
+    Results.Ok(await svc.UpdateTeamAsync(teamCode, dealerCode, d))).RequireAuthorization();
+
+// Sys_UserTeam_Delete (nguồn 2010.HTC): xóa đội + dọn mọi thành viên (Sys_UserInTeam) của đội.
+app.MapDelete("/api/teams/{teamCode}/{dealerCode}", async (string teamCode, string dealerCode, IRbacService svc) =>
+{
+    var r = await svc.DeleteTeamAsync(teamCode, dealerCode);
+    return r.Ok ? Results.Ok(r) : Results.NotFound(r);
+}).RequireAuthorization();
+
 // Thành viên đội (Sys_UserInTeam_Save): thay TOÀN BỘ thành viên của đội trong 1 thao tác.
 // Ràng buộc nguồn: mỗi user chỉ thuộc MỘT đội duy nhất (one-user-one-team).
 app.MapPut("/api/teams/{teamCode}/{dealerCode}/members", async (string teamCode, string dealerCode, GroupMembersDto d, IRbacService svc) =>

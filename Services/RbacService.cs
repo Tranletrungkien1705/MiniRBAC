@@ -9,6 +9,8 @@ public record GrantDto(string PermissionCode);
 public record AssignDto(string RoleCode);
 public record SysObjectDto(string ObjectCode, string ObjectName, string? ObjectType, string? ObjectCodeParent, bool? FlagActive);
 public record UserTeamDto(string TeamCode, string DealerCode, string TeamName, bool? FlagActive);
+public record UpdateTeamDto(string? TeamName, bool? FlagActive, List<string>? Cols);
+public record DeleteTeamResult(bool Ok, string Reason, string TeamCode, string DealerCode, int RemovedMembers);
 public record UserScopeDto(string UserKey, string? DealerCode, string? DBCode, string? TeamCode, bool? FlagSysAdmin, bool? FlagDBAdmin, bool? FlagTeamLeader, bool? FlagSalesman);
 public record GroupDto(string GroupCode, string GroupName, bool? FlagActive);
 public record GroupMembersDto(List<string> UserCodes);
@@ -44,6 +46,10 @@ public interface IRbacService
     // Sys_UserTeam + phạm vi dữ liệu (nguồn 2010.HTC)
     Task<object> AddTeamAsync(UserTeamDto d);
     Task<object> ListTeamsAsync(string? dealerCode, bool? activeOnly);
+    // Sys_UserTeam_Create / Sys_UserTeam_Update / Sys_UserTeam_Delete (nguồn 2010.HTC)
+    Task<object> CreateTeamAsync(UserTeamDto d);
+    Task<object> UpdateTeamAsync(string teamCode, string dealerCode, UpdateTeamDto d);
+    Task<DeleteTeamResult> DeleteTeamAsync(string teamCode, string dealerCode);
     Task<object> SetUserScopeAsync(UserScopeDto d);
     Task<object> ViewAbilityAsync(string userKey);
     // Sys_UserInTeam_Save (nguồn 2010.HTC): thay TOÀN BỘ thành viên của đội trong 1 thao tác
@@ -319,6 +325,84 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         var items = await q.OrderBy(x => x.DealerCode).ThenBy(x => x.TeamCode)
             .Select(x => new { x.TeamCode, x.DealerCode, x.TeamName, x.FlagActive }).ToListAsync();
         return new { count = items.Count, items };
+    }
+
+    // ===== Sys_UserTeam_Create (nguồn 2010.HTC) =====
+    // Tạo đội bán hàng mới kèm kiểm tra ràng buộc giống nguồn:
+    //  (1) TeamCode bắt buộc (Sys_UserTeam_Create_InvalidTeamCode);
+    //  (2) (TeamCode, DealerCode) CHƯA tồn tại (Sys_UserTeam_CheckDB, Flag.No → TeamCodeExist);
+    //  (3) TeamName bắt buộc (Sys_UserTeam_Create_InvalidTeamName);
+    //  (4) DealerCode phải TỒN TẠI và ĐANG HOẠT ĐỘNG (Mst_Dealer_CheckDB, Flag.Yes+Active).
+    // Ghi với FlagActive='1'. Khác AddTeamAsync (upsert không kiểm tra trùng) — đây là thao tác TẠO thuần theo nguồn.
+    public async Task<object> CreateTeamAsync(UserTeamDto d)
+    {
+        var teamCode = (d.TeamCode ?? "").Trim().ToUpperInvariant();
+        var dealerCode = (d.DealerCode ?? "").Trim().ToUpperInvariant();
+        var teamName = (d.TeamName ?? "").Trim();
+
+        if (teamCode.Length == 0) return new { ok = false, reason = "invalid_teamcode" };
+        if (await db.SysUserTeams.AnyAsync(x => x.OrgId == Org && x.TeamCode == teamCode && x.DealerCode == dealerCode))
+            return new { ok = false, reason = "teamcode_exist", teamCode, dealerCode };
+        if (teamName.Length == 0) return new { ok = false, reason = "invalid_teamname" };
+        if (!await db.MstDealers.AnyAsync(x => x.OrgId == Org && x.DealerCode == dealerCode && x.FlagActive))
+            return new { ok = false, reason = "dealer_not_found", dealerCode };
+
+        var t = new SysUserTeam { OrgId = Org, TeamCode = teamCode, DealerCode = dealerCode, TeamName = teamName, FlagActive = true };
+        db.SysUserTeams.Add(t);
+        await db.SaveChangesAsync();
+        return new { ok = true, reason = "ok", team = new { t.TeamCode, t.DealerCode, t.TeamName, t.FlagActive } };
+    }
+
+    // ===== Sys_UserTeam_Update (nguồn 2010.HTC) =====
+    // Cập nhật đội bán hàng (partial theo Ft_Cols_Upd) kèm kiểm tra ràng buộc giống nguồn:
+    //  (1) Sys_UserTeam_CheckDB(Flag.Yes): đội phải TỒN TẠI, nếu không trả reason team_not_found;
+    //  (2) nếu cập nhật TeamName thì phải KHÁC RỖNG (Sys_UserTeam_Update_InvalidTeamName);
+    //  (3) FlagActive cập nhật khi có trong Cols. Cols rỗng/null = cập nhật tất cả cột cho phép.
+    public async Task<object> UpdateTeamAsync(string teamCode, string dealerCode, UpdateTeamDto d)
+    {
+        teamCode = (teamCode ?? "").Trim().ToUpperInvariant();
+        dealerCode = (dealerCode ?? "").Trim().ToUpperInvariant();
+        var t = await db.SysUserTeams.FirstOrDefaultAsync(x => x.OrgId == Org && x.TeamCode == teamCode && x.DealerCode == dealerCode);
+        if (t is null) return new { ok = false, reason = "team_not_found", teamCode, dealerCode };
+
+        // Ft_Cols_Upd: danh sách cột cần cập nhật (rỗng = tất cả). So khớp không phân biệt hoa/thường.
+        var cols = (d.Cols ?? new List<string>())
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim().ToUpperInvariant()).ToHashSet();
+        bool Upd(string col) => cols.Count == 0 || cols.Contains(col.ToUpperInvariant());
+
+        var teamName = (d.TeamName ?? "").Trim();
+        if (Upd("TeamName") && teamName.Length == 0)
+            return new { ok = false, reason = "invalid_teamname", teamCode, dealerCode };
+
+        if (Upd("TeamName")) t.TeamName = teamName;
+        if (Upd("FlagActive")) t.FlagActive = d.FlagActive ?? true;
+
+        await db.SaveChangesAsync();
+        return new { ok = true, reason = "ok", team = new { t.TeamCode, t.DealerCode, t.TeamName, t.FlagActive } };
+    }
+
+    // ===== Sys_UserTeam_Delete (nguồn 2010.HTC) =====
+    // Xóa đội bán hàng kèm dọn thành viên giống nguồn:
+    //  (1) Sys_UserTeam_CheckDB(Flag.Yes): đội phải TỒN TẠI, nếu không trả reason team_not_found;
+    //  (2) Sys_UserInTeam_Delete_ByTeam: xóa mọi dòng Sys_UserInTeam của đội (TeamCode+DealerCode);
+    //  (3) xóa dòng Sys_UserTeam. Toàn bộ trong 1 thao tác (nguồn dùng transaction).
+    public async Task<DeleteTeamResult> DeleteTeamAsync(string teamCode, string dealerCode)
+    {
+        teamCode = (teamCode ?? "").Trim().ToUpperInvariant();
+        dealerCode = (dealerCode ?? "").Trim().ToUpperInvariant();
+        var t = await db.SysUserTeams.FirstOrDefaultAsync(x => x.OrgId == Org && x.TeamCode == teamCode && x.DealerCode == dealerCode);
+        if (t is null) return new DeleteTeamResult(false, "team_not_found", teamCode, dealerCode, 0);
+
+        // Dọn thành viên đội (Sys_UserInTeam_Delete_ByTeam).
+        var members = await db.SysUserInTeams.Where(x => x.OrgId == Org && x.TeamCode == teamCode && x.DealerCode == dealerCode).ToListAsync();
+        db.SysUserInTeams.RemoveRange(members);
+
+        // Xóa đội (Sys_UserTeam).
+        db.SysUserTeams.Remove(t);
+        await db.SaveChangesAsync();
+
+        return new DeleteTeamResult(true, "ok", teamCode, dealerCode, members.Count);
     }
 
     // Phạm vi dữ liệu user (Sys_User): cờ vai trò + vị trí (DealerCode/DBCode/TeamCode).
