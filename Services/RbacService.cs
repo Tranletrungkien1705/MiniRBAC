@@ -21,6 +21,10 @@ public record CreateUserDto(string UserCode, string? DealerCode, string? DeptCod
 public record UpdateUserDto(string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive, List<string>? Cols);
 public record DeleteUserResult(bool Ok, string Reason, string UserCode, int RemovedGroups, int RemovedTeams);
 public record UserSearchDto(string? UserCode, string? DealerCode, string? DeptCode, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive, int? RecordStart, int? RecordCount, bool? IncludeGroups, bool? IncludeTeams);
+// Sys_User_Import (nguồn 2010.HTC, SysUserController.Import): 1 dòng dữ liệu import user.
+// Cột theo TblSys_User: UserCode/DealerCode/DeptCode/UserStaffId/UserName/UserPassword/UserEmail/
+// UserPhoneNo/ViewAbilityType/FlagSysAdmin/FlagSaleMan/FlagSMSReceive.
+public record ImportUserRowDto(string? UserCode, string? DealerCode, string? DeptCode, string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, string? FlagSysAdmin, string? FlagSaleMan, string? FlagSMSReceive);
 
 public interface IRbacService
 {
@@ -89,6 +93,8 @@ public interface IRbacService
     Task<DeleteUserResult> DeleteUserAsync(string userCode);
     // Sys_User_Get (nguồn 2010.HTC): tìm/liệt kê user có phân trang + tùy chọn kèm nhóm/đội, mật khẩu che
     Task<object> SearchUsersAsync(UserSearchDto d);
+    // Sys_User_Import (nguồn 2010.HTC): import hàng loạt user từ danh sách dòng kèm chuỗi kiểm tra ràng buộc
+    Task<object> ImportUsersAsync(List<ImportUserRowDto> rows);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -1192,4 +1198,108 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
             userInTeam
         };
     }
+
+    // ===== Sys_User_Import (nguồn 2010.HTC) =====
+    // Màn IMPORT hàng loạt user (SysUserController.Import). Nguồn đọc file Excel 12 cột rồi kiểm tra
+    // từng dòng trước khi gọi Sys_User_Create cho mỗi dòng. MiniRBAC nhận danh sách dòng đã tách cột
+    // (không phụ thuộc thư viện Excel) nhưng giữ NGUYÊN chuỗi kiểm tra ràng buộc của nguồn:
+    //  (1) mỗi dòng phải đủ 12 cột (nguồn: table.Columns.Count != 12 → MESS_CHECK_FILE_IMPORT);
+    //  (2) các cột bắt buộc KHÁC RỖNG: UserCode, DealerCode, UserName, UserPassword, DeptCode,
+    //      ViewAbilityType, FlagSMSReceive, FlagSysAdmin, FlagSaleMan;
+    //  (3) UserPhoneNo (nếu có) phải là SỐ NGUYÊN và >= 0 (CUtils.IsInteger);
+    //  (4) UserEmail (nếu có) phải là EMAIL HỢP LỆ (CUtils.IsValidEmail);
+    //  (5) FlagSMSReceive/FlagSysAdmin/FlagSaleMan phải là SỐ và chỉ nhận '0' hoặc '1';
+    //  (6) UserCode KHÔNG được LẶP trong file (kiểm tra chéo toàn bộ dòng);
+    //  (7) mỗi dòng hợp lệ gọi Sys_User_Create (CreateUserAsync) — nếu 1 dòng vi phạm ràng buộc tạo
+    //      (trùng UserCode trong DB, dealer/dept không tồn tại, staffid trùng...) thì DỪNG và báo lỗi dòng đó.
+    // Trả về: ok, imported (số dòng đã tạo), total, và reason/row khi thất bại.
+    public async Task<object> ImportUsersAsync(List<ImportUserRowDto> rows)
+    {
+        if (rows is null || rows.Count == 0)
+            return new { ok = false, reason = "empty_file", imported = 0, total = 0 };
+
+        // (1) Mỗi dòng phải đủ 12 cột (nguồn kiểm table.Columns.Count != 12).
+        //     Dòng thiếu cột (null toàn bộ) coi như không đủ 12 cột.
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            if (r is null)
+                return new { ok = false, reason = "invalid_column_count", row = i + 1, imported = 0, total = rows.Count };
+        }
+
+        // (2)-(5) Kiểm tra từng dòng theo đúng thứ tự nguồn.
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            var rowNo = i + 1;
+            string S(string? v) => (v ?? "").Trim();
+
+            if (S(r.UserCode).Length == 0) return new { ok = false, reason = "invalid_usercode", row = rowNo, imported = 0, total = rows.Count };
+            if (S(r.DealerCode).Length == 0) return new { ok = false, reason = "invalid_dealercode", row = rowNo, imported = 0, total = rows.Count };
+            if (S(r.UserName).Length == 0) return new { ok = false, reason = "invalid_username", row = rowNo, imported = 0, total = rows.Count };
+            if (S(r.UserPassword).Length == 0) return new { ok = false, reason = "invalid_userpassword", row = rowNo, imported = 0, total = rows.Count };
+            if (S(r.DeptCode).Length == 0) return new { ok = false, reason = "invalid_deptcode", row = rowNo, imported = 0, total = rows.Count };
+
+            // (3) UserPhoneNo (nếu có) phải là số nguyên >= 0.
+            var phone = S(r.UserPhoneNo);
+            if (phone.Length > 0)
+            {
+                if (!long.TryParse(phone, out var phoneNum) || phoneNum < 0)
+                    return new { ok = false, reason = "invalid_phoneno", row = rowNo, imported = 0, total = rows.Count };
+            }
+
+            // (4) UserEmail (nếu có) phải hợp lệ.
+            var email = S(r.UserEmail);
+            if (email.Length > 0 && !IsValidEmail(email))
+                return new { ok = false, reason = "invalid_email", row = rowNo, imported = 0, total = rows.Count };
+
+            if (S(r.ViewAbilityType).Length == 0) return new { ok = false, reason = "invalid_viewabilitytype", row = rowNo, imported = 0, total = rows.Count };
+
+            // (5) Các cờ phải là số và chỉ nhận '0'/'1'.
+            if (!IsFlag01(S(r.FlagSMSReceive))) return new { ok = false, reason = "invalid_flagsmsreceive", row = rowNo, imported = 0, total = rows.Count };
+            if (!IsFlag01(S(r.FlagSysAdmin))) return new { ok = false, reason = "invalid_flagsysadmin", row = rowNo, imported = 0, total = rows.Count };
+            if (!IsFlag01(S(r.FlagSaleMan))) return new { ok = false, reason = "invalid_flagsaleman", row = rowNo, imported = 0, total = rows.Count };
+        }
+
+        // (6) UserCode KHÔNG được lặp trong file.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var code = (rows[i].UserCode ?? "").Trim();
+            if (!seen.Add(code))
+                return new { ok = false, reason = "duplicate_usercode", userCode = code, row = i + 1, imported = 0, total = rows.Count };
+        }
+
+        // (7) Tạo từng user qua Sys_User_Create (CreateUserAsync) — dừng ngay khi 1 dòng vi phạm.
+        int imported = 0;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            var dto = new CreateUserDto(
+                r.UserCode ?? "", r.DealerCode, r.DeptCode, r.UserStaffId, r.UserName, r.UserPassword,
+                r.UserEmail, r.UserPhoneNo, r.ViewAbilityType,
+                FlagSysAdmin: (r.FlagSysAdmin ?? "").Trim() == "1");
+            var res = await CreateUserAsync(dto);
+            var okProp = res.GetType().GetProperty("ok")?.GetValue(res);
+            if (okProp is bool ok && !ok)
+            {
+                var reason = res.GetType().GetProperty("reason")?.GetValue(res) as string ?? "create_failed";
+                return new { ok = false, reason, row = i + 1, userCode = (r.UserCode ?? "").Trim(), imported, total = rows.Count };
+            }
+            imported++;
+        }
+
+        return new { ok = true, reason = "ok", imported, total = rows.Count };
+    }
+
+    // CUtils.IsValidEmail (nguồn 2010.HTC): dùng MailAddress để kiểm tra email hợp lệ.
+    private static bool IsValidEmail(string email)
+    {
+        try { _ = new System.Net.Mail.MailAddress(email); return true; }
+        catch (FormatException) { return false; }
+    }
+
+    // CUtils.IsNumeric + ràng buộc '0'/'1' cho các cờ (nguồn 2010.HTC).
+    private static bool IsFlag01(string value)
+        => value == "0" || value == "1";
 }

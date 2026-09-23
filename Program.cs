@@ -349,6 +349,15 @@ app.MapGet("/api/users", async (string? userCode, string? dealerCode, string? de
     Results.Ok(await svc.SearchUsersAsync(new UserSearchDto(userCode, dealerCode, deptCode, viewAbilityType,
         flagSysAdmin, flagActive, recordStart, recordCount, includeGroups, includeTeams)))).RequireAuthorization();
 
+// ===== Sys_User_Import (nguồn 2010.HTC) =====
+// Import hàng loạt user (SysUserController.Import): nhận danh sách dòng đã tách cột (thay cho file Excel
+// 12 cột của nguồn) và giữ nguyên chuỗi kiểm tra ràng buộc: cột bắt buộc khác rỗng (UserCode/DealerCode/
+// UserName/UserPassword/DeptCode/ViewAbilityType/FlagSMSReceive/FlagSysAdmin/FlagSaleMan), UserPhoneNo
+// là số nguyên >= 0, UserEmail hợp lệ, các cờ chỉ nhận '0'/'1', UserCode không lặp trong file; mỗi dòng
+// hợp lệ gọi Sys_User_Create. Dừng và báo lỗi dòng đầu tiên vi phạm.
+app.MapPost("/api/users/import", async (List<ImportUserRowDto> rows, IRbacService svc) =>
+    Results.Ok(await svc.ImportUsersAsync(rows))).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });
