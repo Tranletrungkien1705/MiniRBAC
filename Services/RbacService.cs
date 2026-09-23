@@ -86,6 +86,9 @@ public interface IRbacService
     Task<object?> ListGroupAccessAsync(string groupCode);
     // GetAccess (nguồn 2010.HTC): màn gán chức năng cho nhóm — toàn bộ object kèm cờ granted
     Task<object?> GetGroupAccessScreenAsync(string groupCode, string? type, bool? activeOnly);
+    // GetUser (nguồn 2010.HTC, SysGroupController.GetUser): màn "Thêm người dùng cho nhóm" —
+    // toàn bộ user kèm cờ checked (đã thuộc nhóm hay chưa) để tick chọn.
+    Task<object?> GetGroupUserScreenAsync(string groupCode, string? userCode, string? userName, bool? activeOnly);
     // Sys_User_GetForCurrentUser (nguồn 2010.HTC): hồ sơ user hiện tại + danh sách object hiệu lực
     Task<object> GetForCurrentUserAsync(string userKey);
     // Sys_User_GetByViewAbility + myCache_ViewAbility_CheckAccessUser (nguồn 2010.HTC)
@@ -728,6 +731,37 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
             granted = grantedSet.Contains(o.ObjectCode)
         }).ToList();
         return new { g.GroupCode, g.GroupName, g.FlagActive, count = items.Count, grantedCount = grantedSet.Count, items };
+    }
+
+    // GetUser (nguồn 2010.HTC, SysGroupController.GetUser + SysGroupServices.ListSysUserGet/ListSysGroupGetUser):
+    // Màn "Thêm người dùng cho nhóm" — trả về TOÀN BỘ danh mục user (Sys_User_Get) kèm cờ `checked`
+    // cho biết user đó đã thuộc nhóm hay chưa (đối chiếu Sys_UserInGroup của nhóm).
+    // Khác ListGroupMembersAsync (chỉ liệt kê user ĐÃ thuộc nhóm): đây là danh sách đầy đủ để tick chọn.
+    // Trả null nếu nhóm không tồn tại.
+    public async Task<object?> GetGroupUserScreenAsync(string groupCode, string? userCode, string? userName, bool? activeOnly)
+    {
+        groupCode = groupCode.Trim().ToUpperInvariant();
+        var g = await db.SysGroups.FirstOrDefaultAsync(x => x.OrgId == Org && x.GroupCode == groupCode);
+        if (g is null) return null;
+
+        var members = await db.SysUserInGroups.Where(x => x.OrgId == Org && x.GroupCode == groupCode)
+            .Select(x => x.UserCode).ToListAsync();
+        var memberSet = new HashSet<string>(members, StringComparer.OrdinalIgnoreCase);
+
+        var q = db.SysUserProfiles.Where(x => x.OrgId == Org);
+        if (!string.IsNullOrWhiteSpace(userCode)) { var v = userCode.Trim(); q = q.Where(x => x.UserCode == v); }
+        if (!string.IsNullOrWhiteSpace(userName)) { var v = userName.Trim(); q = q.Where(x => x.UserName == v); }
+        if (activeOnly == true) q = q.Where(x => x.FlagActive);
+        var all = await q.OrderBy(x => x.UserCode)
+            .Select(x => new { x.UserCode, x.UserName, x.DealerCode, x.FlagSysAdmin, x.FlagActive })
+            .ToListAsync();
+
+        var items = all.Select(u => new
+        {
+            u.UserCode, u.UserName, u.DealerCode, u.FlagSysAdmin, u.FlagActive,
+            @checked = memberSet.Contains(u.UserCode)
+        }).ToList();
+        return new { g.GroupCode, g.GroupName, g.FlagActive, count = items.Count, memberCount = memberSet.Count, items };
     }
 
     // Sys_Access_Get: danh sách object mà nhóm được grant (kèm tên/loại object).

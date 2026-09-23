@@ -304,6 +304,15 @@ app.MapGet("/api/groups/{groupCode}/access-screen", async (string groupCode, str
     return r is null ? Results.NotFound(new { error = "Nhóm không tồn tại." }) : Results.Ok(r);
 }).RequireAuthorization();
 
+// GetUser (nguồn 2010.HTC, SysGroupController.GetUser): màn "Thêm người dùng cho nhóm" —
+// trả về TOÀN BỘ danh mục user kèm cờ checked (đã thuộc nhóm hay chưa) để tick chọn.
+// Khác GET /api/groups/{code}/members (chỉ liệt kê user ĐÃ thuộc nhóm).
+app.MapGet("/api/groups/{groupCode}/users-screen", async (string groupCode, string? userCode, string? userName, bool? activeOnly, IRbacService svc) =>
+{
+    var r = await svc.GetGroupUserScreenAsync(groupCode, userCode, userName, activeOnly);
+    return r is null ? Results.NotFound(new { error = "Nhóm không tồn tại." }) : Results.Ok(r);
+}).RequireAuthorization();
+
 // Sys_Access_Get (nguồn 2010.HTC): màn danh sách/tìm kiếm grant (GroupCode, ObjectCode) trên TOÀN BỘ nhóm,
 // có PHÂN TRANG (recordStart/recordCount) + lọc theo cột (groupCode/objectCode/objectType/objectActiveOnly),
 // join Sys_Object để trả về tên/loại object (so_ObjectName/so_ObjectType) + tổng số dòng khớp (myCount).
