@@ -173,3 +173,22 @@ public sealed class SysUserInTeam
     public string TeamCode { get; set; } = "";
     public string DealerCode { get; set; } = "";
 }
+
+/// <summary>
+/// Khả năng nhìn dữ liệu của user (Sys_User_GetAbilityViewOfUser nguồn 2010.HTC).
+/// Khóa nghiệp vụ = UserCode. Là "ability of user" dùng để tính tập user được XEM/GHI
+/// trong Sys_User_GetByViewAbility. ViewAbilityType: ADMIN/ALL/TEAM/USER (TConst.ViewAbilityType).
+/// DealerCode = 'HTC' (DealerCodeRoot) là gốc; DealerBUPattern = mẫu mã BU của đại lý (Mst_Dealer.DealerBUPattern)
+/// dùng để mở rộng phạm vi xem theo BU khi user ở đại lý gốc.
+/// </summary>
+public sealed class SysUserViewAbility
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string UserCode { get; set; } = "";
+    public string DealerCode { get; set; } = "";
+    public string DealerBUPattern { get; set; } = "";
+    public string ViewAbilityType { get; set; } = "USER"; // ADMIN/ALL/TEAM/USER
+    public bool FlagSysAdmin { get; set; }
+    public bool FlagActive { get; set; } = true;
+}

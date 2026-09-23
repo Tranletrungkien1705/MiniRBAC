@@ -12,6 +12,7 @@ public record UserTeamDto(string TeamCode, string DealerCode, string TeamName, b
 public record UserScopeDto(string UserKey, string? DealerCode, string? DBCode, string? TeamCode, bool? FlagSysAdmin, bool? FlagDBAdmin, bool? FlagTeamLeader, bool? FlagSalesman);
 public record GroupDto(string GroupCode, string GroupName, bool? FlagActive);
 public record GroupMembersDto(List<string> UserCodes);
+public record ViewAbilityDto(string UserCode, string? DealerCode, string? DealerBUPattern, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive);
 
 public interface IRbacService
 {
@@ -47,6 +48,9 @@ public interface IRbacService
     Task<object?> ListGroupAccessAsync(string groupCode);
     // Sys_User_GetForCurrentUser (nguồn 2010.HTC): hồ sơ user hiện tại + danh sách object hiệu lực
     Task<object> GetForCurrentUserAsync(string userKey);
+    // Sys_User_GetByViewAbility + myCache_ViewAbility_CheckAccessUser (nguồn 2010.HTC)
+    Task<object> GetByViewAbilityAsync(string userKey);
+    Task<object> CheckAccessUserAsync(string userKey, string targetUserCode);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -453,5 +457,140 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
             count = objects.Count,
             objects
         };
+    }
+
+    // ===== Sys_User_GetByViewAbility (nguồn 2010.HTC) =====
+    // DealerCodeRoot = 'HTC' (TConst.BizMix.DealerCodeRoot). ViewAbilityType: ADMIN/ALL/TEAM/USER.
+    private const string DealerCodeRoot = "HTC";
+
+    // myCache_Sys_User_ViewAbility_Get: tính tập user được XEM (read) và được GHI (write) của user hiện tại.
+    // Phân nhánh giống nguồn: SysAdmin > (DealerRoot|DealerChild) x (ADMIN|ALL|TEAM|USER).
+    //  - SysAdmin: read = write = TẤT CẢ user.
+    //  - DealerRoot + ADMIN: read = user thuộc đại lý có DealerBUCode khớp DealerBUPattern; write = cùng DealerCode.
+    //  - DealerRoot + ALL:   read = theo DealerBUPattern; write = chính mình.
+    //  - DealerRoot + TEAM:  read = chính mình ∪ thành viên cùng đội (đội đang hoạt động); write = chính mình.
+    //  - DealerRoot + USER:  read = write = chính mình.
+    //  - DealerChild + ADMIN: read = write = user cùng DealerCode.
+    //  - DealerChild + ALL:   read = user cùng DealerCode; write = chính mình.
+    //  - DealerChild + TEAM:  read = chính mình ∪ thành viên cùng đội; write = chính mình.
+    //  - DealerChild + USER:  read = write = chính mình.
+    public async Task<object> GetByViewAbilityAsync(string userKey)
+    {
+        var (found, scope, type, dealerCode, read, write) = await ComputeViewAbilityAsync(userKey);
+        if (!found) return new { userKey = userKey.Trim(), found = false, read = Array.Empty<string>(), write = Array.Empty<string>(), scope = "none" };
+        return new { userKey = userKey.Trim(), found = true, scope, viewAbilityType = type, dealerCode, read, write };
+    }
+
+    private async Task<(bool found, string scope, string type, string dealerCode, List<string> read, List<string> write)> ComputeViewAbilityAsync(string userKey)
+    {
+        userKey = userKey.Trim();
+        var me = await db.SysUserViewAbilities.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserCode == userKey && x.FlagActive);
+        if (me is null) return (false, "none", "", "", new List<string>(), new List<string>());
+
+        var all = await db.SysUserViewAbilities.Where(x => x.OrgId == Org && x.FlagActive).ToListAsync();
+        var type = (me.ViewAbilityType ?? "USER").Trim().ToUpperInvariant();
+        var isRoot = string.Equals(me.DealerCode, DealerCodeRoot, StringComparison.OrdinalIgnoreCase);
+        List<string> read, write; string scope;
+
+        if (me.FlagSysAdmin)
+        {
+            scope = "sysadmin";
+            read = all.Select(x => x.UserCode).Distinct().ToList();
+            write = read.ToList();
+        }
+        else if (isRoot && type == "ADMIN")
+        {
+            // read theo DealerBUPattern (mẫu mã BU của đại lý); write cùng DealerCode.
+            scope = "dealerroot.admin";
+            read = all.Where(x => MatchesBuPattern(x.DealerBUPattern, me.DealerBUPattern)).Select(x => x.UserCode).Distinct().ToList();
+            write = all.Where(x => x.DealerCode == me.DealerCode).Select(x => x.UserCode).Distinct().ToList();
+        }
+        else if (isRoot && type == "ALL")
+        {
+            scope = "dealerroot.all";
+            read = all.Where(x => MatchesBuPattern(x.DealerBUPattern, me.DealerBUPattern)).Select(x => x.UserCode).Distinct().ToList();
+            write = new List<string> { me.UserCode };
+        }
+        else if (isRoot && type == "TEAM")
+        {
+            scope = "dealerroot.team";
+            read = await TeamMembersAsync(me.UserCode);
+            write = new List<string> { me.UserCode };
+        }
+        else if (isRoot && type == "USER")
+        {
+            scope = "dealerroot.user";
+            read = new List<string> { me.UserCode };
+            write = new List<string> { me.UserCode };
+        }
+        else if (!isRoot && type == "ADMIN")
+        {
+            scope = "dealerchild.admin";
+            read = all.Where(x => x.DealerCode == me.DealerCode).Select(x => x.UserCode).Distinct().ToList();
+            write = read.ToList();
+        }
+        else if (!isRoot && type == "ALL")
+        {
+            scope = "dealerchild.all";
+            read = all.Where(x => x.DealerCode == me.DealerCode).Select(x => x.UserCode).Distinct().ToList();
+            write = new List<string> { me.UserCode };
+        }
+        else if (!isRoot && type == "TEAM")
+        {
+            scope = "dealerchild.team";
+            read = await TeamMembersAsync(me.UserCode);
+            write = new List<string> { me.UserCode };
+        }
+        else
+        {
+            scope = "dealerchild.user";
+            read = new List<string> { me.UserCode };
+            write = new List<string> { me.UserCode };
+        }
+        return (true, scope, type, me.DealerCode, read, write);
+    }
+
+    // read của nhánh TEAM: chính mình ∪ thành viên cùng đội (đội đang hoạt động) — giống union trong nguồn.
+    private async Task<List<string>> TeamMembersAsync(string userCode)
+    {
+        var myTeams = await db.SysUserInTeams.Where(x => x.OrgId == Org && x.UserCode == userCode)
+            .Select(x => new { x.TeamCode, x.DealerCode }).ToListAsync();
+        var result = new HashSet<string> { userCode };
+        foreach (var t in myTeams)
+        {
+            var active = await db.SysUserTeams.AnyAsync(x => x.OrgId == Org && x.FlagActive && x.TeamCode == t.TeamCode && x.DealerCode == t.DealerCode);
+            if (!active) continue;
+            var members = await db.SysUserInTeams.Where(x => x.OrgId == Org && x.TeamCode == t.TeamCode && x.DealerCode == t.DealerCode)
+                .Select(x => x.UserCode).ToListAsync();
+            foreach (var m in members) result.Add(m);
+        }
+        return result.OrderBy(x => x).ToList();
+    }
+
+    // So khớp DealerBUCode với DealerBUPattern kiểu SQL LIKE (mẫu có %).
+    private static bool MatchesBuPattern(string? dealerBuCode, string? pattern)
+    {
+        if (string.IsNullOrEmpty(pattern)) return false;
+        if (pattern == "%") return true;
+        var p = pattern.Trim();
+        var code = (dealerBuCode ?? "").Trim();
+        if (p.StartsWith('%') && p.EndsWith('%') && p.Length >= 2)
+            return code.Contains(p.Substring(1, p.Length - 2), StringComparison.OrdinalIgnoreCase);
+        if (p.EndsWith('%')) return code.StartsWith(p.Substring(0, p.Length - 1), StringComparison.OrdinalIgnoreCase);
+        if (p.StartsWith('%')) return code.EndsWith(p.Substring(1), StringComparison.OrdinalIgnoreCase);
+        return string.Equals(code, p, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // myCache_ViewAbility_CheckAccessUser: user hiện tại có quyền GHI lên targetUserCode không.
+    // Dùng tập write của GetByViewAbility; SysAdmin luôn được phép.
+    public async Task<object> CheckAccessUserAsync(string userKey, string targetUserCode)
+    {
+        userKey = userKey.Trim(); targetUserCode = targetUserCode.Trim();
+        var me = await db.SysUserViewAbilities.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserCode == userKey && x.FlagActive);
+        if (me is null) return new { userKey, targetUserCode, allowed = false, reason = "user_not_found" };
+        if (me.FlagSysAdmin) return new { userKey, targetUserCode, allowed = true, reason = "sysadmin" };
+        var (_, _, _, _, _, write) = await ComputeViewAbilityAsync(userKey);
+        var allowed = write.Contains(targetUserCode);
+        return new { userKey, targetUserCode, allowed, reason = allowed ? "in_write_scope" : "denied" };
     }
 }

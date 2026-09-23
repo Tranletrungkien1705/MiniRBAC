@@ -93,6 +93,16 @@ public static class Seeder
                 new SysUserInTeam { OrgId = org, UserCode = "leader01@demo", TeamCode = "TEAM01", DealerCode = "DL01" },
                 new SysUserInTeam { OrgId = org, UserCode = "sale01@demo", TeamCode = "TEAM01", DealerCode = "DL01" });
         }
+        // Khả năng nhìn dữ liệu (Sys_User_GetAbilityViewOfUser nguồn 2010.HTC) — dùng cho Sys_User_GetByViewAbility.
+        // Nguồn KHÔNG có script seed cho bảng này nên dùng dữ liệu minh họa theo đúng mô hình cột,
+        // khớp user đã seed ở trên. DealerCodeRoot = 'HTC' (TConst.BizMix.DealerCodeRoot).
+        if (!await db.SysUserViewAbilities.AnyAsync())
+        {
+            db.SysUserViewAbilities.AddRange(
+                new SysUserViewAbility { OrgId = org, UserCode = "admin@demo", DealerCode = "HTC", DealerBUPattern = "%", ViewAbilityType = "ADMIN", FlagSysAdmin = true },
+                new SysUserViewAbility { OrgId = org, UserCode = "leader01@demo", DealerCode = "DL01", DealerBUPattern = "DL01%", ViewAbilityType = "TEAM" },
+                new SysUserViewAbility { OrgId = org, UserCode = "sale01@demo", DealerCode = "DL01", DealerBUPattern = "DL01%", ViewAbilityType = "USER" });
+        }
         await db.SaveChangesAsync();
     }
 }

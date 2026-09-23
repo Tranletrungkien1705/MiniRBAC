@@ -17,6 +17,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> opt) : DbContext
     public DbSet<SysAccess> SysAccesses => Set<SysAccess>();
     public DbSet<SysUserProfile> SysUserProfiles => Set<SysUserProfile>();
     public DbSet<SysUserInTeam> SysUserInTeams => Set<SysUserInTeam>();
+    public DbSet<SysUserViewAbility> SysUserViewAbilities => Set<SysUserViewAbility>();
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.Entity<Org>().HasIndex(x => x.ApiKey).IsUnique();
@@ -33,5 +34,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> opt) : DbContext
         b.Entity<SysAccess>().HasIndex(x => new { x.OrgId, x.GroupCode, x.ObjectCode }).IsUnique();
         b.Entity<SysUserProfile>().HasIndex(x => new { x.OrgId, x.UserCode }).IsUnique();
         b.Entity<SysUserInTeam>().HasIndex(x => new { x.OrgId, x.UserCode, x.TeamCode, x.DealerCode }).IsUnique();
+        b.Entity<SysUserViewAbility>().HasIndex(x => new { x.OrgId, x.UserCode }).IsUnique();
     }
 }

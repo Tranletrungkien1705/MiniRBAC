@@ -219,6 +219,16 @@ app.MapGet("/api/groups/{groupCode}/access", async (string groupCode, IRbacServi
 app.MapGet("/api/users/{userKey}/current", async (string userKey, IRbacService svc) =>
     Results.Ok(await svc.GetForCurrentUserAsync(userKey))).RequireAuthorization();
 
+// ===== Sys_User_GetByViewAbility (nguồn 2010.HTC) =====
+// Tập user được XEM (read) / GHI (write) của user hiện tại, theo ViewAbilityType (ADMIN/ALL/TEAM/USER)
+// và DealerCode gốc ('HTC') hay đại lý con. Dùng để lọc danh sách user theo phạm vi nhìn dữ liệu.
+app.MapGet("/api/users/{userKey}/viewability2", async (string userKey, IRbacService svc) =>
+    Results.Ok(await svc.GetByViewAbilityAsync(userKey))).RequireAuthorization();
+
+// myCache_ViewAbility_CheckAccessUser: user hiện tại có quyền GHI lên targetUserCode không.
+app.MapGet("/api/users/{userKey}/canaccess/{targetUserCode}", async (string userKey, string targetUserCode, IRbacService svc) =>
+    Results.Ok(await svc.CheckAccessUserAsync(userKey, targetUserCode))).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });
