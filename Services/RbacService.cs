@@ -8,6 +8,8 @@ public record CodeNameDto(string Code, string Name, string? Module);
 public record GrantDto(string PermissionCode);
 public record AssignDto(string RoleCode);
 public record SysObjectDto(string ObjectCode, string ObjectName, string? ObjectType, string? ObjectCodeParent, bool? FlagActive);
+public record UserTeamDto(string TeamCode, string DealerCode, string TeamName, bool? FlagActive);
+public record UserScopeDto(string UserKey, string? DealerCode, string? DBCode, string? TeamCode, bool? FlagSysAdmin, bool? FlagDBAdmin, bool? FlagTeamLeader, bool? FlagSalesman);
 
 public interface IRbacService
 {
@@ -27,6 +29,11 @@ public interface IRbacService
     Task<object> ObjectTreeAsync();
     Task<object> SetSysAdminAsync(string userKey, bool flag);
     Task<object> CheckDenyAsync(string userKey, string objectCode);
+    // Sys_UserTeam + phạm vi dữ liệu (nguồn 2010.HTC)
+    Task<object> AddTeamAsync(UserTeamDto d);
+    Task<object> ListTeamsAsync(string? dealerCode, bool? activeOnly);
+    Task<object> SetUserScopeAsync(UserScopeDto d);
+    Task<object> ViewAbilityAsync(string userKey);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -197,5 +204,94 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         var roles = await db.UserRoles.Where(x => x.OrgId == Org && x.UserKey == userKey).Select(x => x.RoleCode).ToListAsync();
         var granted = roles.Count > 0 && await db.RolePermissions.AnyAsync(x => x.OrgId == Org && roles.Contains(x.RoleCode) && x.PermissionCode == objectCode);
         return new { userKey, objectCode, allowed = granted, reason = granted ? "granted" : "denied" };
+    }
+
+    // ===== Sys_UserTeam (nguồn 2010.HTC) =====
+    public async Task<object> AddTeamAsync(UserTeamDto d)
+    {
+        var teamCode = d.TeamCode.Trim().ToUpperInvariant();
+        var dealerCode = d.DealerCode.Trim().ToUpperInvariant();
+        var t = await db.SysUserTeams.FirstOrDefaultAsync(x => x.OrgId == Org && x.TeamCode == teamCode && x.DealerCode == dealerCode);
+        if (t is null) { t = new SysUserTeam { OrgId = Org, TeamCode = teamCode, DealerCode = dealerCode }; db.SysUserTeams.Add(t); }
+        t.TeamName = d.TeamName.Trim();
+        t.FlagActive = d.FlagActive ?? true;
+        await db.SaveChangesAsync();
+        return new { t.TeamCode, t.DealerCode, t.TeamName, t.FlagActive };
+    }
+
+    public async Task<object> ListTeamsAsync(string? dealerCode, bool? activeOnly)
+    {
+        var q = db.SysUserTeams.Where(x => x.OrgId == Org);
+        if (!string.IsNullOrWhiteSpace(dealerCode)) { var dc = dealerCode.Trim().ToUpperInvariant(); q = q.Where(x => x.DealerCode == dc); }
+        if (activeOnly == true) q = q.Where(x => x.FlagActive);
+        var items = await q.OrderBy(x => x.DealerCode).ThenBy(x => x.TeamCode)
+            .Select(x => new { x.TeamCode, x.DealerCode, x.TeamName, x.FlagActive }).ToListAsync();
+        return new { count = items.Count, items };
+    }
+
+    // Phạm vi dữ liệu user (Sys_User): cờ vai trò + vị trí (DealerCode/DBCode/TeamCode).
+    public async Task<object> SetUserScopeAsync(UserScopeDto d)
+    {
+        var userKey = d.UserKey.Trim();
+        var s = await db.SysUserScopes.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserKey == userKey);
+        if (s is null) { s = new SysUserScope { OrgId = Org, UserKey = userKey }; db.SysUserScopes.Add(s); }
+        s.DealerCode = (d.DealerCode ?? "").Trim().ToUpperInvariant();
+        s.DBCode = (d.DBCode ?? "").Trim().ToUpperInvariant();
+        s.TeamCode = (d.TeamCode ?? "").Trim().ToUpperInvariant();
+        s.FlagSysAdmin = d.FlagSysAdmin ?? false;
+        s.FlagDBAdmin = d.FlagDBAdmin ?? false;
+        s.FlagTeamLeader = d.FlagTeamLeader ?? false;
+        s.FlagSalesman = d.FlagSalesman ?? false;
+        await db.SaveChangesAsync();
+        return new { s.UserKey, s.DealerCode, s.DBCode, s.TeamCode, s.FlagSysAdmin, s.FlagDBAdmin, s.FlagTeamLeader, s.FlagSalesman };
+    }
+
+    // Sys_UserTeam View/Write ability (nguồn 2010.HTC, myCache_Sys_UserTeam_ViewAbility_Get).
+    // Trả về tập UserCode mà user được XEM (read) và được GHI (write) trong phạm vi đội.
+    // Thứ tự ưu tiên nhánh giống nguồn: SysAdmin > DBAdmin > TeamLeader > Salesman.
+    public async Task<object> ViewAbilityAsync(string userKey)
+    {
+        userKey = userKey.Trim();
+        var me = await db.SysUserScopes.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserKey == userKey && x.FlagActive);
+        if (me is null) return new { userKey, read = Array.Empty<string>(), write = Array.Empty<string>(), scope = "none" };
+
+        var all = await db.SysUserScopes.Where(x => x.OrgId == Org && x.FlagActive).ToListAsync();
+        List<string> read, write; string scope;
+
+        if (me.FlagSysAdmin)
+        {
+            // SysAdmin: xem tất cả; ghi trong cùng DealerCode.
+            scope = "sysadmin";
+            read = all.Select(x => x.UserKey).Distinct().ToList();
+            write = all.Where(x => x.DealerCode == me.DealerCode).Select(x => x.UserKey).Distinct().ToList();
+        }
+        else if (me.FlagDBAdmin)
+        {
+            // DBAdmin: xem/ghi trong cùng DealerCode.
+            scope = "dbadmin";
+            read = all.Where(x => x.DealerCode == me.DealerCode).Select(x => x.UserKey).Distinct().ToList();
+            write = read.ToList();
+        }
+        else if (me.FlagTeamLeader && !string.IsNullOrEmpty(me.TeamCode))
+        {
+            // TeamLeader: xem/ghi các thành viên cùng đội (TeamCode + DealerCode).
+            scope = "teamleader";
+            read = all.Where(x => x.TeamCode == me.TeamCode && x.DealerCode == me.DealerCode).Select(x => x.UserKey).Distinct().ToList();
+            write = read.ToList();
+        }
+        else if (me.FlagSalesman)
+        {
+            // Salesman: chỉ chính mình.
+            scope = "salesman";
+            read = new List<string> { me.UserKey };
+            write = new List<string> { me.UserKey };
+        }
+        else
+        {
+            scope = "none";
+            read = new List<string>();
+            write = new List<string>();
+        }
+        return new { userKey, scope, read, write };
     }
 }

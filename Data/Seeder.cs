@@ -36,6 +36,22 @@ public static class Seeder
                 new SysObject { OrgId = org, ObjectCode = "MNU_ADMIN_USER", ObjectName = "Menu Quản trị - QL người dùng", ObjectType = "MENU", ObjectCodeParent = "MNU_ADMIN" },
                 new SysObject { OrgId = org, ObjectCode = "MNU_ADMIN_GROUP_FUNCTION", ObjectName = "Menu Quản trị - Gán nhóm, chức năng", ObjectType = "MENU", ObjectCodeParent = "MNU_ADMIN" });
         }
+        // Đội bán hàng (Sys_UserTeam nguồn 2010.HTC) + phạm vi dữ liệu user (Sys_User).
+        // Nguồn KHÔNG có script seed cho 2 bảng này nên dùng dữ liệu minh họa theo đúng mô hình cột.
+        if (!await db.SysUserTeams.AnyAsync())
+        {
+            db.SysUserTeams.AddRange(
+                new SysUserTeam { OrgId = org, TeamCode = "TEAM01", DealerCode = "DL01", TeamName = "Đội bán hàng 1" },
+                new SysUserTeam { OrgId = org, TeamCode = "TEAM02", DealerCode = "DL01", TeamName = "Đội bán hàng 2" },
+                new SysUserTeam { OrgId = org, TeamCode = "TEAM01", DealerCode = "DL02", TeamName = "Đội bán hàng 1 (CN2)" });
+        }
+        if (!await db.SysUserScopes.AnyAsync())
+        {
+            db.SysUserScopes.AddRange(
+                new SysUserScope { OrgId = org, UserKey = "admin@demo", DealerCode = "DL01", DBCode = "ROOT", FlagSysAdmin = true },
+                new SysUserScope { OrgId = org, UserKey = "leader01@demo", DealerCode = "DL01", DBCode = "ROOT", TeamCode = "TEAM01", FlagTeamLeader = true },
+                new SysUserScope { OrgId = org, UserKey = "sale01@demo", DealerCode = "DL01", DBCode = "ROOT", TeamCode = "TEAM01", FlagSalesman = true });
+        }
         await db.SaveChangesAsync();
     }
 }

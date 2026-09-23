@@ -158,6 +158,23 @@ app.MapPost("/api/import/userroles", async (List<ImportUserRoleDto> rows, IRbacS
     return Results.Ok(new { assigned = n, total = rows.Count });
 }).RequireAuthorization();
 
+// ===== Sys_UserTeam + phạm vi dữ liệu (nguồn 2010.HTC) =====
+// Đội bán hàng: khóa (TeamCode, DealerCode), FlagActive.
+app.MapPost("/api/teams", async (UserTeamDto d, IRbacService svc) =>
+    string.IsNullOrWhiteSpace(d.TeamCode) || string.IsNullOrWhiteSpace(d.DealerCode)
+        ? Results.BadRequest(new { error = "Cần TeamCode và DealerCode." })
+        : Results.Ok(await svc.AddTeamAsync(d))).RequireAuthorization();
+app.MapGet("/api/teams", async (string? dealerCode, bool? activeOnly, IRbacService svc) =>
+    Results.Ok(await svc.ListTeamsAsync(dealerCode, activeOnly))).RequireAuthorization();
+
+// Phạm vi dữ liệu user (Sys_User): cờ vai trò + vị trí.
+app.MapPost("/api/users/{userKey}/scope", async (string userKey, UserScopeDto d, IRbacService svc) =>
+    Results.Ok(await svc.SetUserScopeAsync(d with { UserKey = userKey }))).RequireAuthorization();
+
+// View/Write ability (Sys_UserTeam): tập user được xem/ghi theo phạm vi đội.
+app.MapGet("/api/users/{userKey}/viewability", async (string userKey, IRbacService svc) =>
+    Results.Ok(await svc.ViewAbilityAsync(userKey))).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });

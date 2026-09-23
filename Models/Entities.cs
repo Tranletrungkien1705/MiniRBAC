@@ -72,3 +72,36 @@ public sealed class SysUserFlag
     public bool FlagSysAdmin { get; set; }
     public bool FlagActive { get; set; } = true;
 }
+
+/// <summary>
+/// Đội/nhóm bán hàng (Sys_UserTeam nguồn 2010.HTC).
+/// Khóa nghiệp vụ = (TeamCode, DealerCode). FlagActive: chỉ đội đang hoạt động mới dùng để phân quyền phạm vi.
+/// </summary>
+public sealed class SysUserTeam
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string TeamCode { get; set; } = "";
+    public string DealerCode { get; set; } = "";
+    public string TeamName { get; set; } = "";
+    public bool FlagActive { get; set; } = true;
+}
+
+/// <summary>
+/// Phạm vi dữ liệu của user (Sys_User nguồn 2010.HTC) — dùng cho View/Write ability của Sys_UserTeam.
+/// Các cờ: FlagSysAdmin, FlagDBAdmin, FlagTeamLeader, FlagSalesman; vị trí: DealerCode, DBCode, TeamCode.
+/// </summary>
+public sealed class SysUserScope
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string UserKey { get; set; } = "";
+    public string DealerCode { get; set; } = "";
+    public string DBCode { get; set; } = "";
+    public string TeamCode { get; set; } = "";
+    public bool FlagSysAdmin { get; set; }
+    public bool FlagDBAdmin { get; set; }
+    public bool FlagTeamLeader { get; set; }
+    public bool FlagSalesman { get; set; }
+    public bool FlagActive { get; set; } = true;
+}
