@@ -79,6 +79,8 @@ public interface IRbacService
     // Sys_User_Login + Sys_User_ChangePassword (nguồn 2010.HTC)
     Task<object> LoginAsync(string userCode, string password);
     Task<object> ChangePasswordAsync(string userCode, string oldPassword, string newPassword);
+    // Sys_User_ResetPass (nguồn 2010.HTC): admin đặt lại mật khẩu user (KHÔNG cần mật khẩu cũ)
+    Task<object> ResetPasswordAsync(string userCode, string newPassword);
     // Sys_User_Create (nguồn 2010.HTC): tạo hồ sơ user kèm kiểm tra ràng buộc
     Task<object> CreateUserAsync(CreateUserDto d);
     // Sys_User_Update (nguồn 2010.HTC): cập nhật hồ sơ user (partial theo Ft_Cols_Upd) kèm kiểm tra ràng buộc
@@ -941,6 +943,26 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         if (!user.FlagActive) return new { userCode, ok = false, reason = "user_inactive" };
         if (!string.Equals(oldPassword ?? "", user.UserPassword, StringComparison.Ordinal))
             return new { userCode, ok = false, reason = "invalid_password_old" };
+        if (string.IsNullOrWhiteSpace(newPassword))
+            return new { userCode, ok = false, reason = "new_password_empty" };
+
+        user.UserPassword = newPassword;
+        await db.SaveChangesAsync();
+        return new { userCode, ok = true, reason = "ok" };
+    }
+
+    // ===== Sys_User_ResetPass (nguồn 2010.HTC) =====
+    // Màn "Đặt lại mật khẩu" của admin (SysUserController.ResetPass → SysUserService.UserUpdatePass):
+    // gọi Sys_User_Update với Ft_Cols_Upd = "Sys_User.UserPassword" — cập nhật PARTIAL CHỈ cột mật khẩu.
+    // Khác ChangePasswordAsync (đã port): KHÔNG kiểm tra mật khẩu cũ (admin không cần biết mật khẩu cũ).
+    // Ràng buộc nguồn: (1) Sys_User_CheckDB(Flag.Yes): user phải TỒN TẠI, nếu không trả reason user_not_found;
+    // (2) mật khẩu mới phải KHÁC RỖNG. Ghi mật khẩu mới (nguồn hash trước khi lưu; MiniRBAC lưu plaintext
+    // cho nhất quán với Login/ChangePassword đã port).
+    public async Task<object> ResetPasswordAsync(string userCode, string newPassword)
+    {
+        userCode = (userCode ?? "").Trim();
+        var user = await db.SysUserProfiles.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserCode == userCode);
+        if (user is null) return new { userCode, ok = false, reason = "user_not_found" };
         if (string.IsNullOrWhiteSpace(newPassword))
             return new { userCode, ok = false, reason = "new_password_empty" };
 

@@ -308,6 +308,12 @@ app.MapPost("/api/login", async (LoginDto d, IRbacService svc) =>
 app.MapPost("/api/users/{userKey}/changepassword", async (string userKey, ChangePasswordDto d, IRbacService svc) =>
     Results.Ok(await svc.ChangePasswordAsync(userKey, d.OldPassword ?? "", d.NewPassword ?? ""))).RequireAuthorization();
 
+// ===== Sys_User_ResetPass (nguồn 2010.HTC) =====
+// Admin đặt lại mật khẩu user (SysUserController.ResetPass → Sys_User_Update với Ft_Cols_Upd="Sys_User.UserPassword"):
+// cập nhật PARTIAL CHỈ cột mật khẩu, KHÔNG cần mật khẩu cũ. User phải tồn tại; mật khẩu mới khác rỗng.
+app.MapPost("/api/users/{userKey}/resetpassword", async (string userKey, ResetPasswordDto d, IRbacService svc) =>
+    Results.Ok(await svc.ResetPasswordAsync(userKey, d.NewPassword ?? ""))).RequireAuthorization();
+
 // ===== Sys_User_Create (nguồn 2010.HTC) =====
 // Tạo hồ sơ user mới kèm kiểm tra ràng buộc: UserCode bắt buộc + chưa tồn tại; DealerCode phải tồn tại;
 // DeptCode phải tồn tại + đang hoạt động theo đại lý; UserStaffId (nếu có) duy nhất theo đại lý;
@@ -360,3 +366,4 @@ record ImportUserRoleDto(string? UserCode, string? FlagSysAdmin, string? FlagSys
 record GroupAccessDto(List<string> ObjectCodes);
 record LoginDto(string UserCode, string? Password);
 record ChangePasswordDto(string? OldPassword, string? NewPassword);
+record ResetPasswordDto(string? NewPassword);
