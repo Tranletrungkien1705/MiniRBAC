@@ -36,6 +36,12 @@ public record ObjectSearchDto(string? ObjectCode, string? ObjectName, string? Ob
 // Cột theo TblSys_User: UserCode/DealerCode/DeptCode/UserStaffId/UserName/UserPassword/UserEmail/
 // UserPhoneNo/ViewAbilityType/FlagSysAdmin/FlagSaleMan/FlagSMSReceive.
 public record ImportUserRowDto(string? UserCode, string? DealerCode, string? DeptCode, string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, string? FlagSysAdmin, string? FlagSaleMan, string? FlagSMSReceive);
+// Mst_AreaMarket (nguồn 2010.HTC): vùng thị trường — khóa AreaCode, cây theo AreaCodeParent,
+// AreaBUCode/AreaBUPattern/AreaLevel do Mst_AreaMarket_UpdBU tính lại sau mỗi lần ghi.
+public record AreaMarketSearchDto(string? AreaCode, string? AreaCodeParent, string? AreaStatus, bool? FlagActive, int? RecordStart, int? RecordCount);
+public record AreaMarketDto(string AreaCode, string? AreaCodeParent, string? AreaDesc);
+public record UpdateAreaMarketDto(string? AreaCodeParent, string? AreaDesc, string? AreaStatus, List<string>? Cols);
+public record DeleteAreaMarketResult(bool Ok, string Reason, string AreaCode);
 
 public interface IRbacService
 {
@@ -119,6 +125,11 @@ public interface IRbacService
     Task<object> SearchTeamsAsync(TeamSearchDto d);
     // Sys_Object_Get (nguồn 2010.HTC): tìm/liệt kê danh mục đối tượng/chức năng có phân trang + lọc theo cột
     Task<object> SearchObjectsAsync(ObjectSearchDto d);
+    // Mst_AreaMarket (nguồn 2010.HTC): CRUD vùng thị trường + Mst_AreaMarket_UpdBU (tính AreaBUCode/AreaBUPattern/AreaLevel)
+    Task<object> SearchAreaMarketsAsync(AreaMarketSearchDto d);
+    Task<object> CreateAreaMarketAsync(AreaMarketDto d);
+    Task<object> UpdateAreaMarketAsync(string areaCode, UpdateAreaMarketDto d);
+    Task<DeleteAreaMarketResult> DeleteAreaMarketAsync(string areaCode);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -1575,6 +1586,152 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
             .Select(x => new { x.ObjectCode, x.ObjectName, x.ObjectType, x.ObjectCodeParent, x.FlagActive }).ToListAsync();
 
         return new { myCount = total, recordStart = start, recordCount = count, count = items.Count, items };
+    }
+
+    // ===== Mst_AreaMarket (nguồn 2010.HTC) =====
+    // Vùng thị trường: khóa AreaCode, cây theo AreaCodeParent, AreaStatus (TConst.Flag.Active='1').
+    // AreaBUCode/AreaBUPattern/AreaLevel KHÔNG nhập tay — do Mst_AreaMarket_UpdBU tính lại sau mỗi lần ghi.
+
+    // Mst_AreaMarket_Get: tìm/liệt kê vùng thị trường có PHÂN TRANG (Ft_RecordStart/Ft_RecordCount)
+    // + lọc theo cột (areaCode/areaCodeParent/areaStatus/flagActive), sắp xếp AreaCode asc, kèm MyCount.
+    public async Task<object> SearchAreaMarketsAsync(AreaMarketSearchDto d)
+    {
+        var q = db.MstAreaMarkets.Where(x => x.OrgId == Org);
+        if (!string.IsNullOrWhiteSpace(d.AreaCode)) { var v = d.AreaCode.Trim().ToUpperInvariant(); q = q.Where(x => x.AreaCode == v); }
+        if (!string.IsNullOrWhiteSpace(d.AreaCodeParent)) { var v = d.AreaCodeParent.Trim().ToUpperInvariant(); q = q.Where(x => x.AreaCodeParent == v); }
+        if (!string.IsNullOrWhiteSpace(d.AreaStatus)) { var v = d.AreaStatus.Trim(); q = q.Where(x => x.AreaStatus == v); }
+        if (d.FlagActive is not null) q = q.Where(x => x.FlagActive == d.FlagActive);
+
+        var total = await q.CountAsync();
+        var start = d.RecordStart is > 0 ? d.RecordStart.Value : 0;
+        var count = d.RecordCount is > 0 ? d.RecordCount.Value : 100;
+
+        var items = await q.OrderBy(x => x.AreaCode).Skip(start).Take(count)
+            .Select(x => new { x.AreaCode, x.AreaName, x.AreaCodeParent, x.AreaBUCode, x.AreaBUPattern, x.AreaLevel, x.AreaStatus, x.FlagActive })
+            .ToListAsync();
+        return new { myCount = total, recordStart = start, recordCount = count, count = items.Count, items };
+    }
+
+    // Mst_AreaMarket_Create (nguồn 2010.HTC): tạo vùng mới kèm kiểm tra ràng buộc giống nguồn:
+    //  (1) AreaCode bắt buộc (Mst_AreaMarket_Create_InvalidAreaCode);
+    //  (2) AreaCode CHƯA tồn tại (Mst_AreaMarket_CheckDB, Flag.No → AreaMarketExist);
+    //  (3) AreaCodeParent (nếu có) phải TỒN TẠI + ĐANG HOẠT ĐỘNG (Mst_AreaMarket_CheckDB, Flag.Yes+Active);
+    //  (4) AreaDesc bắt buộc (Mst_AreaMarket_Create_InvalidAreaDesc).
+    // Ghi AreaStatus='1', AreaLevel=1, AreaBUCode/AreaBUPattern='X' rồi gọi Mst_AreaMarket_UpdBU tính lại.
+    public async Task<object> CreateAreaMarketAsync(AreaMarketDto d)
+    {
+        var areaCode = (d.AreaCode ?? "").Trim().ToUpperInvariant();
+        var parent = string.IsNullOrWhiteSpace(d.AreaCodeParent) ? null : d.AreaCodeParent.Trim().ToUpperInvariant();
+        var desc = (d.AreaDesc ?? "").Trim();
+
+        if (areaCode.Length == 0) return new { ok = false, reason = "invalid_areacode" };
+        if (await db.MstAreaMarkets.AnyAsync(x => x.OrgId == Org && x.AreaCode == areaCode))
+            return new { ok = false, reason = "areamarket_exist", areaCode };
+        if (parent is not null && !await db.MstAreaMarkets.AnyAsync(x => x.OrgId == Org && x.AreaCode == parent && x.FlagActive))
+            return new { ok = false, reason = "parent_not_found", areaCodeParent = parent };
+        if (desc.Length == 0) return new { ok = false, reason = "invalid_areadesc" };
+
+        var a = new MstAreaMarket
+        {
+            OrgId = Org, AreaCode = areaCode, AreaCodeParent = parent, AreaName = desc,
+            AreaBUCode = "X", AreaBUPattern = "X", AreaLevel = 1, AreaStatus = "1", FlagActive = true
+        };
+        db.MstAreaMarkets.Add(a);
+        await db.SaveChangesAsync();
+        await UpdAreaMarketBuAsync();
+        return new { ok = true, reason = "ok", area = new { a.AreaCode, a.AreaName, a.AreaCodeParent, a.AreaBUCode, a.AreaBUPattern, a.AreaLevel, a.AreaStatus, a.FlagActive } };
+    }
+
+    // Mst_AreaMarket_Update (nguồn 2010.HTC): cập nhật vùng (partial theo Ft_Cols_Upd) kèm kiểm tra ràng buộc:
+    //  (1) Mst_AreaMarket_CheckDB(Flag.Yes): vùng phải TỒN TẠI, nếu không trả reason area_not_found;
+    //  (2) nếu cập nhật AreaCodeParent thì vùng cha phải TỒN TẠI + ĐANG HOẠT ĐỘNG;
+    //  (3) nếu cập nhật AreaDesc thì phải KHÁC RỖNG (Mst_AreaMarket_Update_InvalidAreaDesc);
+    //  (4) nếu chuyển AreaStatus sang KHÔNG hoạt động ('0') thì KHÔNG được còn vùng con đang hoạt động
+    //      (Mst_AreaMarket_Update_ExistAreaMarketChildActive). Cols rỗng/null = cập nhật tất cả cột cho phép.
+    // Sau khi ghi, nếu có đổi AreaCodeParent thì gọi Mst_AreaMarket_UpdBU tính lại BU.
+    public async Task<object> UpdateAreaMarketAsync(string areaCode, UpdateAreaMarketDto d)
+    {
+        areaCode = (areaCode ?? "").Trim().ToUpperInvariant();
+        var a = await db.MstAreaMarkets.FirstOrDefaultAsync(x => x.OrgId == Org && x.AreaCode == areaCode);
+        if (a is null) return new { ok = false, reason = "area_not_found", areaCode };
+
+        var cols = (d.Cols ?? new List<string>())
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim().ToUpperInvariant()).ToHashSet();
+        bool Upd(string col) => cols.Count == 0 || cols.Contains(col.ToUpperInvariant());
+
+        var parent = string.IsNullOrWhiteSpace(d.AreaCodeParent) ? null : d.AreaCodeParent.Trim().ToUpperInvariant();
+        var desc = (d.AreaDesc ?? "").Trim();
+        var status = string.IsNullOrWhiteSpace(d.AreaStatus) ? null : d.AreaStatus.Trim();
+
+        bool updParent = Upd("AreaCodeParent");
+        bool updDesc = Upd("AreaDesc");
+        bool updStatus = Upd("AreaStatus");
+
+        if (updParent && parent is not null && !await db.MstAreaMarkets.AnyAsync(x => x.OrgId == Org && x.AreaCode == parent && x.FlagActive))
+            return new { ok = false, reason = "parent_not_found", areaCodeParent = parent };
+        if (updDesc && desc.Length == 0)
+            return new { ok = false, reason = "invalid_areadesc", areaCode };
+
+        // Chuyển sang KHÔNG hoạt động: không được còn vùng con đang hoạt động.
+        if (updStatus && status == "0")
+        {
+            var child = await db.MstAreaMarkets.FirstOrDefaultAsync(x => x.OrgId == Org && x.AreaCodeParent == areaCode && x.FlagActive);
+            if (child is not null)
+                return new { ok = false, reason = "exist_areamarket_child_active", areaCode, childAreaCode = child.AreaCode, childAreaStatus = child.AreaStatus };
+        }
+
+        if (updParent) a.AreaCodeParent = parent;
+        if (updDesc) a.AreaName = desc;
+        if (updStatus && status is not null) { a.AreaStatus = status; a.FlagActive = status != "0"; }
+
+        await db.SaveChangesAsync();
+        if (updParent) await UpdAreaMarketBuAsync();
+        return new { ok = true, reason = "ok", area = new { a.AreaCode, a.AreaName, a.AreaCodeParent, a.AreaBUCode, a.AreaBUPattern, a.AreaLevel, a.AreaStatus, a.FlagActive } };
+    }
+
+    // Mst_AreaMarket_Delete (nguồn 2010.HTC): xóa vùng — vùng phải TỒN TẠI (Mst_AreaMarket_CheckDB, Flag.Yes),
+    // nếu không trả reason area_not_found.
+    public async Task<DeleteAreaMarketResult> DeleteAreaMarketAsync(string areaCode)
+    {
+        areaCode = (areaCode ?? "").Trim().ToUpperInvariant();
+        var a = await db.MstAreaMarkets.FirstOrDefaultAsync(x => x.OrgId == Org && x.AreaCode == areaCode);
+        if (a is null) return new DeleteAreaMarketResult(false, "area_not_found", areaCode);
+        db.MstAreaMarkets.Remove(a);
+        await db.SaveChangesAsync();
+        return new DeleteAreaMarketResult(true, "ok", areaCode);
+    }
+
+    // Mst_AreaMarket_UpdBU (nguồn 2010.HTC): tính lại AreaBUCode/AreaBUPattern/AreaLevel cho toàn bộ cây vùng.
+    // Gốc 'VN': AreaBUCode='VN', AreaBUPattern='VN%', AreaLevel=1. Các vùng khác (tối đa 6 tầng):
+    // AreaBUCode = cha.AreaBUCode + '.' + AreaCode, AreaBUPattern = AreaBUCode + '%', AreaLevel = cha.AreaLevel + 1.
+    private async Task UpdAreaMarketBuAsync()
+    {
+        const string root = "VN";
+        var all = await db.MstAreaMarkets.Where(x => x.OrgId == Org).ToListAsync();
+        var byCode = all.ToDictionary(x => x.AreaCode, StringComparer.OrdinalIgnoreCase);
+
+        // Gốc.
+        if (byCode.TryGetValue(root, out var r))
+        {
+            r.AreaBUCode = root; r.AreaBUPattern = root + "%"; r.AreaLevel = 1;
+        }
+
+        // Lặp tối đa 6 tầng (giống while @nDeepAreaMarket <= 6 của nguồn).
+        for (int depth = 0; depth <= 6; depth++)
+        {
+            foreach (var a in all)
+            {
+                if (string.Equals(a.AreaCode, root, StringComparison.OrdinalIgnoreCase)) continue;
+                var parentCode = a.AreaCodeParent;
+                if (string.IsNullOrWhiteSpace(parentCode) || !byCode.TryGetValue(parentCode, out var p)) continue;
+                var prefix = string.IsNullOrEmpty(p.AreaBUCode) ? "" : p.AreaBUCode + ".";
+                a.AreaBUCode = prefix + a.AreaCode;
+                a.AreaBUPattern = prefix + a.AreaCode + "%";
+                a.AreaLevel = (p.AreaLevel <= 0 ? 0 : p.AreaLevel) + 1;
+            }
+        }
+        await db.SaveChangesAsync();
     }
 
     // CUtils.IsValidEmail (nguồn 2010.HTC): dùng MailAddress để kiểm tra email hợp lệ.

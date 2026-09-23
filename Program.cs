@@ -130,6 +130,31 @@ app.MapGet("/api/objects/search", async (string? objectCode, string? objectName,
     Results.Ok(await svc.SearchObjectsAsync(new ObjectSearchDto(objectCode, objectName, objectType, objectCodeParent,
         flagActive, recordStart, recordCount)))).RequireAuthorization();
 
+// ===== Mst_AreaMarket (nguồn 2010.HTC) =====
+// Vùng thị trường: khóa AreaCode, cây theo AreaCodeParent, AreaStatus ('1' hoạt động).
+// AreaBUCode/AreaBUPattern/AreaLevel do Mst_AreaMarket_UpdBU tính lại sau mỗi lần ghi (không nhập tay).
+app.MapGet("/api/areamarkets", async (string? areaCode, string? areaCodeParent, string? areaStatus,
+    bool? flagActive, int? recordStart, int? recordCount, IRbacService svc) =>
+    Results.Ok(await svc.SearchAreaMarketsAsync(new AreaMarketSearchDto(areaCode, areaCodeParent, areaStatus,
+        flagActive, recordStart, recordCount)))).RequireAuthorization();
+
+// Mst_AreaMarket_Create: AreaCode bắt buộc + chưa tồn tại, AreaCodeParent (nếu có) phải tồn tại + đang hoạt động,
+// AreaDesc bắt buộc. Ghi AreaStatus='1' rồi tính lại BU.
+app.MapPost("/api/areamarkets", async (AreaMarketDto d, IRbacService svc) =>
+    string.IsNullOrWhiteSpace(d.AreaCode) ? Results.BadRequest(new { error = "Cần AreaCode." })
+        : Results.Ok(await svc.CreateAreaMarketAsync(d))).RequireAuthorization();
+
+// Mst_AreaMarket_Update: cập nhật partial theo Ft_Cols_Upd; chuyển sang không hoạt động bị chặn nếu còn vùng con active.
+app.MapPut("/api/areamarkets/{areaCode}", async (string areaCode, UpdateAreaMarketDto d, IRbacService svc) =>
+    Results.Ok(await svc.UpdateAreaMarketAsync(areaCode, d))).RequireAuthorization();
+
+// Mst_AreaMarket_Delete: vùng phải tồn tại.
+app.MapDelete("/api/areamarkets/{areaCode}", async (string areaCode, IRbacService svc) =>
+{
+    var r = await svc.DeleteAreaMarketAsync(areaCode);
+    return r.Ok ? Results.Ok(r) : Results.NotFound(r);
+}).RequireAuthorization();
+
 // Cờ quản trị hệ thống (Sys_User.FlagSysAdmin) — bypass trong deny-check.
 app.MapPost("/api/users/{userKey}/sysadmin", async (string userKey, bool flag, IRbacService svc) =>
     Results.Ok(await svc.SetSysAdminAsync(userKey, flag))).RequireAuthorization();

@@ -142,9 +142,9 @@ public static class Seeder
         if (!await db.MstAreaMarkets.AnyAsync())
         {
             db.MstAreaMarkets.AddRange(
-                new MstAreaMarket { OrgId = org, AreaCode = "VN", AreaName = "Toàn quốc", AreaBUCode = "VN", AreaBUPattern = "VN%", AreaStatus = "1" },
-                new MstAreaMarket { OrgId = org, AreaCode = "MB", AreaName = "Miền Bắc", AreaCodeParent = "VN", AreaBUCode = "VN.MB", AreaBUPattern = "VN.MB%", AreaStatus = "1" },
-                new MstAreaMarket { OrgId = org, AreaCode = "MN", AreaName = "Miền Nam", AreaCodeParent = "VN", AreaBUCode = "VN.MN", AreaBUPattern = "VN.MN%", AreaStatus = "1" });
+                new MstAreaMarket { OrgId = org, AreaCode = "VN", AreaName = "Toàn quốc", AreaBUCode = "VN", AreaBUPattern = "VN%", AreaLevel = 1, AreaStatus = "1" },
+                new MstAreaMarket { OrgId = org, AreaCode = "MB", AreaName = "Miền Bắc", AreaCodeParent = "VN", AreaBUCode = "VN.MB", AreaBUPattern = "VN.MB%", AreaLevel = 2, AreaStatus = "1" },
+                new MstAreaMarket { OrgId = org, AreaCode = "MN", AreaName = "Miền Nam", AreaCodeParent = "VN", AreaBUCode = "VN.MN", AreaBUPattern = "VN.MN%", AreaLevel = 2, AreaStatus = "1" });
         }
         // Phiên đăng nhập (Session nguồn 2010.HTC) — dùng cho Sys_User_Logout.
         // Nguồn KHÔNG có script seed cho bảng này (phiên sinh động khi login) nên dùng 1 phiên

@@ -228,6 +228,7 @@ public sealed class MstAreaMarket
     public string? AreaBUCode { get; set; }
     public string? AreaBUPattern { get; set; }
     public string? AreaStatus { get; set; }
+    public int AreaLevel { get; set; } = 1;   // cấp vùng (Mst_AreaMarket.AreaLevel) — Mst_AreaMarket_UpdBU tính lại
     public bool FlagActive { get; set; } = true;
 }
 
