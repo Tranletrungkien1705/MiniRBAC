@@ -14,6 +14,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> opt) : DbContext
     public DbSet<SysUserScope> SysUserScopes => Set<SysUserScope>();
     public DbSet<SysGroup> SysGroups => Set<SysGroup>();
     public DbSet<SysUserInGroup> SysUserInGroups => Set<SysUserInGroup>();
+    public DbSet<SysAccess> SysAccesses => Set<SysAccess>();
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.Entity<Org>().HasIndex(x => x.ApiKey).IsUnique();
@@ -27,5 +28,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> opt) : DbContext
         b.Entity<SysUserScope>().HasIndex(x => new { x.OrgId, x.UserKey }).IsUnique();
         b.Entity<SysGroup>().HasIndex(x => new { x.OrgId, x.GroupCode }).IsUnique();
         b.Entity<SysUserInGroup>().HasIndex(x => new { x.OrgId, x.GroupCode, x.UserCode }).IsUnique();
+        b.Entity<SysAccess>().HasIndex(x => new { x.OrgId, x.GroupCode, x.ObjectCode }).IsUnique();
     }
 }

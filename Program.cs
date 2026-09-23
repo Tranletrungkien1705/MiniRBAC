@@ -198,6 +198,20 @@ app.MapGet("/api/groups/{groupCode}/members", async (string groupCode, IRbacServ
 app.MapGet("/api/users/{userKey}/groups", async (string userKey, IRbacService svc) =>
     Results.Ok(await svc.GroupsOfUserAsync(userKey))).RequireAuthorization();
 
+// ===== Sys_Access (nguồn 2010.HTC) =====
+// Grant object cho nhóm (Sys_Access_Save): thay TOÀN BỘ grant của nhóm trong 1 thao tác
+// (xóa hết grant cũ rồi ghi danh sách object mới). Chỉ nhận object đang hoạt động.
+app.MapPut("/api/groups/{groupCode}/access", async (string groupCode, GroupAccessDto d, IRbacService svc) =>
+{
+    var r = await svc.SetGroupAccessAsync(groupCode, d.ObjectCodes);
+    return r is null ? Results.NotFound(new { error = "Nhóm không tồn tại." }) : Results.Ok(r);
+}).RequireAuthorization();
+app.MapGet("/api/groups/{groupCode}/access", async (string groupCode, IRbacService svc) =>
+{
+    var r = await svc.ListGroupAccessAsync(groupCode);
+    return r is null ? Results.NotFound(new { error = "Nhóm không tồn tại." }) : Results.Ok(r);
+}).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });
@@ -210,3 +224,4 @@ app.Run();
 
 record RegisterOrgDto(string Name);
 record ImportUserRoleDto(string? UserCode, string? FlagSysAdmin, string? FlagSysViewer);
+record GroupAccessDto(List<string> ObjectCodes);

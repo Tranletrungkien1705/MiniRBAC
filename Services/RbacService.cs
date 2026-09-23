@@ -42,6 +42,9 @@ public interface IRbacService
     Task<object?> SetGroupMembersAsync(string groupCode, List<string> userCodes);
     Task<object?> ListGroupMembersAsync(string groupCode);
     Task<object> GroupsOfUserAsync(string userCode);
+    // Sys_Access (nguồn 2010.HTC): grant object cho nhóm, thay toàn bộ trong 1 lần
+    Task<object?> SetGroupAccessAsync(string groupCode, List<string> objectCodes);
+    Task<object?> ListGroupAccessAsync(string groupCode);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -362,5 +365,39 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         var groups = await db.SysUserInGroups.Where(x => x.OrgId == Org && x.UserCode == userCode)
             .Select(x => x.GroupCode).OrderBy(x => x).ToListAsync();
         return new { userCode, groups };
+    }
+
+    // ===== Sys_Access (nguồn 2010.HTC) =====
+    // Sys_Access_Save: thay TOÀN BỘ grant object của nhóm trong 1 thao tác
+    // (xóa hết grant cũ của nhóm rồi ghi danh sách object mới). Trả null nếu nhóm không tồn tại.
+    // Chỉ nhận object ĐANG HOẠT ĐỘNG (Sys_Object.FlagActive) — giống điều kiện join trong Sys_Access_CheckDeny.
+    public async Task<object?> SetGroupAccessAsync(string groupCode, List<string> objectCodes)
+    {
+        groupCode = groupCode.Trim().ToUpperInvariant();
+        if (!await db.SysGroups.AnyAsync(x => x.OrgId == Org && x.GroupCode == groupCode)) return null;
+        var old = await db.SysAccesses.Where(x => x.OrgId == Org && x.GroupCode == groupCode).ToListAsync();
+        db.SysAccesses.RemoveRange(old);
+        var wanted = (objectCodes ?? new List<string>())
+            .Where(o => !string.IsNullOrWhiteSpace(o))
+            .Select(o => o.Trim().ToUpperInvariant()).Distinct().ToList();
+        var active = await db.SysObjects.Where(x => x.OrgId == Org && x.FlagActive && wanted.Contains(x.ObjectCode))
+            .Select(x => x.ObjectCode).ToListAsync();
+        foreach (var o in active)
+            db.SysAccesses.Add(new SysAccess { OrgId = Org, GroupCode = groupCode, ObjectCode = o });
+        await db.SaveChangesAsync();
+        return new { groupCode, objects = active, skipped = wanted.Except(active).ToList() };
+    }
+
+    // Sys_Access_Get: danh sách object mà nhóm được grant (kèm tên/loại object).
+    public async Task<object?> ListGroupAccessAsync(string groupCode)
+    {
+        groupCode = groupCode.Trim().ToUpperInvariant();
+        var g = await db.SysGroups.FirstOrDefaultAsync(x => x.OrgId == Org && x.GroupCode == groupCode);
+        if (g is null) return null;
+        var items = await db.SysAccesses.Where(x => x.OrgId == Org && x.GroupCode == groupCode)
+            .Join(db.SysObjects.Where(o => o.OrgId == Org), a => a.ObjectCode, o => o.ObjectCode,
+                (a, o) => new { o.ObjectCode, o.ObjectName, o.ObjectType, o.FlagActive })
+            .OrderBy(x => x.ObjectCode).ToListAsync();
+        return new { g.GroupCode, g.GroupName, g.FlagActive, count = items.Count, objects = items };
     }
 }

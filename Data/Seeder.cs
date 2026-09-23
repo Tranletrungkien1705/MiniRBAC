@@ -64,6 +64,19 @@ public static class Seeder
                 new SysUserInGroup { OrgId = org, GroupCode = "GRP_SALES", UserCode = "leader01@demo" },
                 new SysUserInGroup { OrgId = org, GroupCode = "GRP_ADMIN", UserCode = "admin@demo" });
         }
+        // Quyền nhóm trên object (Sys_Access nguồn 2010.HTC) — dùng mã object thật đã seed ở trên.
+        // Nguồn KHÔNG có script seed cho bảng này nên dùng dữ liệu minh họa theo đúng mô hình cột.
+        if (!await db.SysAccesses.AnyAsync())
+        {
+            db.SysAccesses.AddRange(
+                new SysAccess { OrgId = org, GroupCode = "GRP_SALES", ObjectCode = "MNU_SALES" },
+                new SysAccess { OrgId = org, GroupCode = "GRP_SALES", ObjectCode = "MNU_SALES_CREATE_OD" },
+                new SysAccess { OrgId = org, GroupCode = "GRP_SALES", ObjectCode = "MNU_SALES_MNG_OD_HTC" },
+                new SysAccess { OrgId = org, GroupCode = "GRP_SALES", ObjectCode = "BTN_MNG_OD_HTC_APRV_1" },
+                new SysAccess { OrgId = org, GroupCode = "GRP_ADMIN", ObjectCode = "MNU_ADMIN" },
+                new SysAccess { OrgId = org, GroupCode = "GRP_ADMIN", ObjectCode = "MNU_ADMIN_USER" },
+                new SysAccess { OrgId = org, GroupCode = "GRP_ADMIN", ObjectCode = "MNU_ADMIN_GROUP_FUNCTION" });
+        }
         await db.SaveChangesAsync();
     }
 }

@@ -130,3 +130,16 @@ public sealed class SysUserInGroup
     public string GroupCode { get; set; } = "";
     public string UserCode { get; set; } = "";
 }
+
+/// <summary>
+/// Quyền của nhóm trên đối tượng (Sys_Access nguồn 2010.HTC). Khóa nghiệp vụ = (GroupCode, ObjectCode).
+/// Là mắt nối nhóm → object trong Sys_Access_CheckDeny: user thuộc nhóm đang hoạt động có grant object
+/// đang hoạt động thì được phép. Thao tác Sys_Access_Save thay TOÀN BỘ grant của nhóm trong 1 lần.
+/// </summary>
+public sealed class SysAccess
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string GroupCode { get; set; } = "";
+    public string ObjectCode { get; set; } = "";
+}
