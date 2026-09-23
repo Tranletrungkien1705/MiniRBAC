@@ -21,6 +21,8 @@ public record CreateUserDto(string UserCode, string? DealerCode, string? DeptCod
 public record UpdateUserDto(string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive, List<string>? Cols);
 public record DeleteUserResult(bool Ok, string Reason, string UserCode, int RemovedGroups, int RemovedTeams);
 public record UserSearchDto(string? UserCode, string? DealerCode, string? DeptCode, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive, int? RecordStart, int? RecordCount, bool? IncludeGroups, bool? IncludeTeams);
+// Sys_Access_Get (nguồn 2010.HTC): tìm/liệt kê grant (GroupCode, ObjectCode) có PHÂN TRANG + lọc theo cột.
+public record AccessSearchDto(string? GroupCode, string? ObjectCode, string? ObjectType, bool? ObjectActiveOnly, int? RecordStart, int? RecordCount);
 // Sys_User_Import (nguồn 2010.HTC, SysUserController.Import): 1 dòng dữ liệu import user.
 // Cột theo TblSys_User: UserCode/DealerCode/DeptCode/UserStaffId/UserName/UserPassword/UserEmail/
 // UserPhoneNo/ViewAbilityType/FlagSysAdmin/FlagSaleMan/FlagSMSReceive.
@@ -95,6 +97,8 @@ public interface IRbacService
     Task<object> SearchUsersAsync(UserSearchDto d);
     // Sys_User_Import (nguồn 2010.HTC): import hàng loạt user từ danh sách dòng kèm chuỗi kiểm tra ràng buộc
     Task<object> ImportUsersAsync(List<ImportUserRowDto> rows);
+    // Sys_Access_Get (nguồn 2010.HTC): tìm/liệt kê grant (GroupCode, ObjectCode) có phân trang + lọc theo cột
+    Task<object> SearchAccessAsync(AccessSearchDto d);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -1290,6 +1294,59 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         }
 
         return new { ok = true, reason = "ok", imported, total = rows.Count };
+    }
+
+    // ===== Sys_Access_Get (nguồn 2010.HTC) =====
+    // Tìm/liệt kê grant (GroupCode, ObjectCode) có PHÂN TRANG (Ft_RecordStart/Ft_RecordCount) + lọc theo cột
+    // (Ft_WhereClause), join Sys_Object để trả về tên/loại object (so_ObjectName/so_ObjectType).
+    // Khác ListGroupAccessAsync (đã port, chỉ liệt kê object ĐÃ grant của MỘT nhóm, không phân trang):
+    // đây là màn danh sách/tìm kiếm grant trên TOÀN BỘ nhóm, có tổng số dòng khớp (MyCount).
+    public async Task<object> SearchAccessAsync(AccessSearchDto d)
+    {
+        // Lọc theo cột (tương đương Ft_WhereClause của nguồn, đã chuẩn hóa về các cột cho phép).
+        var q = db.SysAccesses.Where(x => x.OrgId == Org);
+        if (!string.IsNullOrWhiteSpace(d.GroupCode)) { var v = d.GroupCode.Trim().ToUpperInvariant(); q = q.Where(x => x.GroupCode == v); }
+        if (!string.IsNullOrWhiteSpace(d.ObjectCode)) { var v = d.ObjectCode.Trim().ToUpperInvariant(); q = q.Where(x => x.ObjectCode == v); }
+
+        // Lọc theo loại/trạng thái object (join Sys_Object) — nguồn left join Sys_Object so.
+        if (!string.IsNullOrWhiteSpace(d.ObjectType) || d.ObjectActiveOnly == true)
+        {
+            var objQ = db.SysObjects.Where(x => x.OrgId == Org);
+            if (!string.IsNullOrWhiteSpace(d.ObjectType)) { var t = d.ObjectType.Trim().ToUpperInvariant(); objQ = objQ.Where(x => x.ObjectType == t); }
+            if (d.ObjectActiveOnly == true) objQ = objQ.Where(x => x.FlagActive);
+            var codes = objQ.Select(x => x.ObjectCode);
+            q = q.Where(x => codes.Contains(x.ObjectCode));
+        }
+
+        var total = await q.CountAsync();
+
+        // Phân trang: Ft_RecordStart (0-based) + Ft_RecordCount. Mặc định lấy từ đầu, tối đa 100 dòng.
+        var start = d.RecordStart is > 0 ? d.RecordStart.Value : 0;
+        var count = d.RecordCount is > 0 ? d.RecordCount.Value : 100;
+
+        // Sắp xếp giống nguồn: GroupCode asc, ObjectCode asc.
+        var page = await q.OrderBy(x => x.GroupCode).ThenBy(x => x.ObjectCode).Skip(start).Take(count)
+            .Select(x => new { x.GroupCode, x.ObjectCode }).ToListAsync();
+
+        // Left join Sys_Object để lấy tên/loại object (so_ObjectName/so_ObjectType).
+        var objCodes = page.Select(x => x.ObjectCode).Distinct().ToList();
+        var objs = await db.SysObjects.Where(x => x.OrgId == Org && objCodes.Contains(x.ObjectCode))
+            .Select(x => new { x.ObjectCode, x.ObjectName, x.ObjectType, x.FlagActive }).ToListAsync();
+        var objMap = objs.ToDictionary(x => x.ObjectCode, x => x, StringComparer.OrdinalIgnoreCase);
+
+        var items = page.Select(a =>
+        {
+            objMap.TryGetValue(a.ObjectCode, out var o);
+            return new
+            {
+                a.GroupCode, a.ObjectCode,
+                so_ObjectName = o?.ObjectName,
+                so_ObjectType = o?.ObjectType,
+                so_FlagActive = o?.FlagActive
+            };
+        }).ToList();
+
+        return new { myCount = total, recordStart = start, recordCount = count, count = items.Count, items };
     }
 
     // CUtils.IsValidEmail (nguồn 2010.HTC): dùng MailAddress để kiểm tra email hợp lệ.
