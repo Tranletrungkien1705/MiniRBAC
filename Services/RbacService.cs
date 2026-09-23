@@ -14,6 +14,7 @@ public record GroupDto(string GroupCode, string GroupName, bool? FlagActive);
 public record GroupMembersDto(List<string> UserCodes);
 public record ViewAbilityDto(string UserCode, string? DealerCode, string? DealerBUPattern, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive);
 public record CreateUserDto(string UserCode, string? DealerCode, string? DeptCode, string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin);
+public record DeleteUserResult(bool Ok, string Reason, string UserCode, int RemovedGroups, int RemovedTeams);
 
 public interface IRbacService
 {
@@ -60,6 +61,8 @@ public interface IRbacService
     Task<object> ChangePasswordAsync(string userCode, string oldPassword, string newPassword);
     // Sys_User_Create (nguồn 2010.HTC): tạo hồ sơ user kèm kiểm tra ràng buộc
     Task<object> CreateUserAsync(CreateUserDto d);
+    // Sys_User_Delete (nguồn 2010.HTC): xóa hồ sơ user + dọn thành viên nhóm/đội của user
+    Task<DeleteUserResult> DeleteUserAsync(string userCode);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -743,5 +746,32 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         db.SysUserProfiles.Add(u);
         await db.SaveChangesAsync();
         return new { ok = true, reason = "ok", user = new { u.UserCode, u.DealerCode, u.DeptCode, u.UserStaffId, u.UserName, u.ViewAbilityType, u.FlagSysAdmin, u.FlagActive } };
+    }
+
+    // ===== Sys_User_Delete (nguồn 2010.HTC) =====
+    // Xóa hồ sơ user kèm dọn dẹp liên kết giống nguồn:
+    //  (1) Sys_User_CheckDB(Flag.Yes): user phải TỒN TẠI, nếu không trả reason user_not_found;
+    //  (2) Sys_UserInGroup_Delete_ByUser: xóa mọi dòng Sys_UserInGroup của user;
+    //  (3) Sys_UserInTeam_Delete_ByUser: xóa mọi dòng Sys_UserInTeam của user;
+    //  (4) xóa dòng Sys_User. Toàn bộ trong 1 thao tác (nguồn dùng transaction).
+    public async Task<DeleteUserResult> DeleteUserAsync(string userCode)
+    {
+        userCode = (userCode ?? "").Trim();
+        var user = await db.SysUserProfiles.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserCode == userCode);
+        if (user is null) return new DeleteUserResult(false, "user_not_found", userCode, 0, 0);
+
+        // Dọn thành viên nhóm (Sys_UserInGroup_Delete_ByUser).
+        var groups = await db.SysUserInGroups.Where(x => x.OrgId == Org && x.UserCode == userCode).ToListAsync();
+        db.SysUserInGroups.RemoveRange(groups);
+
+        // Dọn thành viên đội (Sys_UserInTeam_Delete_ByUser).
+        var teams = await db.SysUserInTeams.Where(x => x.OrgId == Org && x.UserCode == userCode).ToListAsync();
+        db.SysUserInTeams.RemoveRange(teams);
+
+        // Xóa hồ sơ user (Sys_User).
+        db.SysUserProfiles.Remove(user);
+        await db.SaveChangesAsync();
+
+        return new DeleteUserResult(true, "ok", userCode, groups.Count, teams.Count);
     }
 }

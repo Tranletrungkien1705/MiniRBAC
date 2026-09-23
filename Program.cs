@@ -261,6 +261,15 @@ app.MapPost("/api/users", async (CreateUserDto d, IRbacService svc) =>
     string.IsNullOrWhiteSpace(d.UserCode) ? Results.BadRequest(new { error = "Cần UserCode." })
         : Results.Ok(await svc.CreateUserAsync(d))).RequireAuthorization();
 
+// ===== Sys_User_Delete (nguồn 2010.HTC) =====
+// Xóa hồ sơ user kèm dọn liên kết: xóa mọi dòng Sys_UserInGroup và Sys_UserInTeam của user,
+// rồi xóa dòng Sys_User. User phải tồn tại (Sys_User_CheckDB, Flag.Yes).
+app.MapDelete("/api/users/{userKey}", async (string userKey, IRbacService svc) =>
+{
+    var r = await svc.DeleteUserAsync(userKey);
+    return r.Ok ? Results.Ok(r) : Results.NotFound(r);
+}).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });
