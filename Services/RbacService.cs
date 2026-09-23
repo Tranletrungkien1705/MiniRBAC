@@ -29,6 +29,9 @@ public record GroupSearchDto(string? GroupCode, string? GroupName, bool? FlagAct
 // Sys_UserTeam_Get (nguồn 2010.HTC): tìm/liệt kê đội bán hàng có PHÂN TRANG + lọc theo cột (teamCode/dealerCode/teamName/flagActive),
 // tùy chọn kèm thành viên đội (Sys_UserInTeam + tên user qua left join Sys_User).
 public record TeamSearchDto(string? TeamCode, string? DealerCode, string? TeamName, bool? FlagActive, int? RecordStart, int? RecordCount, bool? IncludeMembers);
+// Sys_Object_Get (nguồn 2010.HTC): tìm/liệt kê danh mục đối tượng/chức năng có PHÂN TRANG + lọc theo cột
+// (objectCode/objectName/objectType/objectCodeParent/flagActive).
+public record ObjectSearchDto(string? ObjectCode, string? ObjectName, string? ObjectType, string? ObjectCodeParent, bool? FlagActive, int? RecordStart, int? RecordCount);
 // Sys_User_Import (nguồn 2010.HTC, SysUserController.Import): 1 dòng dữ liệu import user.
 // Cột theo TblSys_User: UserCode/DealerCode/DeptCode/UserStaffId/UserName/UserPassword/UserEmail/
 // UserPhoneNo/ViewAbilityType/FlagSysAdmin/FlagSaleMan/FlagSMSReceive.
@@ -109,6 +112,8 @@ public interface IRbacService
     Task<object> SearchGroupsAsync(GroupSearchDto d);
     // Sys_UserTeam_Get (nguồn 2010.HTC): tìm/liệt kê đội bán hàng có phân trang + tùy chọn kèm thành viên đội
     Task<object> SearchTeamsAsync(TeamSearchDto d);
+    // Sys_Object_Get (nguồn 2010.HTC): tìm/liệt kê danh mục đối tượng/chức năng có phân trang + lọc theo cột
+    Task<object> SearchObjectsAsync(ObjectSearchDto d);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -1469,6 +1474,35 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
             teams,
             userInTeam
         };
+    }
+
+    // ===== Sys_Object_Get (nguồn 2010.HTC) =====
+    // Tìm/liệt kê danh mục đối tượng/chức năng (Sys_Object) có PHÂN TRANG (Ft_RecordStart/Ft_RecordCount)
+    // + lọc theo cột (Ft_WhereClause: objectCode/objectName/objectType/objectCodeParent/flagActive),
+    // sắp xếp theo ObjectCode asc, trả về tổng số dòng khớp (MyCount).
+    // Khác ListObjectsAsync (đã port, liệt kê đơn giản không phân trang) và ObjectTreeAsync (dựng cây) —
+    // đây là màn danh sách/tìm kiếm object đầy đủ theo nguồn (đối xứng với SearchGroupsAsync/SearchTeamsAsync).
+    public async Task<object> SearchObjectsAsync(ObjectSearchDto d)
+    {
+        // Lọc theo cột (tương đương Ft_WhereClause của nguồn, đã chuẩn hóa về các cột cho phép).
+        var q = db.SysObjects.Where(x => x.OrgId == Org);
+        if (!string.IsNullOrWhiteSpace(d.ObjectCode)) { var v = d.ObjectCode.Trim().ToUpperInvariant(); q = q.Where(x => x.ObjectCode == v); }
+        if (!string.IsNullOrWhiteSpace(d.ObjectName)) { var v = d.ObjectName.Trim(); q = q.Where(x => x.ObjectName == v); }
+        if (!string.IsNullOrWhiteSpace(d.ObjectType)) { var v = d.ObjectType.Trim().ToUpperInvariant(); q = q.Where(x => x.ObjectType == v); }
+        if (!string.IsNullOrWhiteSpace(d.ObjectCodeParent)) { var v = d.ObjectCodeParent.Trim().ToUpperInvariant(); q = q.Where(x => x.ObjectCodeParent == v); }
+        if (d.FlagActive is not null) q = q.Where(x => x.FlagActive == d.FlagActive);
+
+        var total = await q.CountAsync();
+
+        // Phân trang: Ft_RecordStart (0-based) + Ft_RecordCount. Mặc định lấy từ đầu, tối đa 100 dòng.
+        var start = d.RecordStart is > 0 ? d.RecordStart.Value : 0;
+        var count = d.RecordCount is > 0 ? d.RecordCount.Value : 100;
+
+        // Sắp xếp giống nguồn: ObjectCode asc.
+        var items = await q.OrderBy(x => x.ObjectCode).Skip(start).Take(count)
+            .Select(x => new { x.ObjectCode, x.ObjectName, x.ObjectType, x.ObjectCodeParent, x.FlagActive }).ToListAsync();
+
+        return new { myCount = total, recordStart = start, recordCount = count, count = items.Count, items };
     }
 
     // CUtils.IsValidEmail (nguồn 2010.HTC): dùng MailAddress để kiểm tra email hợp lệ.

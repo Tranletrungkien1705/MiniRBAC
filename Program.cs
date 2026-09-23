@@ -121,6 +121,15 @@ app.MapGet("/api/objects", async (string? type, bool? activeOnly, IRbacService s
     Results.Ok(await svc.ListObjectsAsync(type, activeOnly))).RequireAuthorization();
 app.MapGet("/api/objects/tree", async (IRbacService svc) => Results.Ok(await svc.ObjectTreeAsync())).RequireAuthorization();
 
+// Sys_Object_Get (nguồn 2010.HTC): màn danh sách/tìm kiếm danh mục đối tượng/chức năng có PHÂN TRANG
+// (recordStart/recordCount) + lọc theo cột (objectCode/objectName/objectType/objectCodeParent/flagActive),
+// sắp xếp theo ObjectCode asc, kèm tổng số dòng khớp (myCount).
+// Khác GET /api/objects (liệt kê đơn giản, không phân trang) và GET /api/objects/tree (dựng cây).
+app.MapGet("/api/objects/search", async (string? objectCode, string? objectName, string? objectType, string? objectCodeParent,
+    bool? flagActive, int? recordStart, int? recordCount, IRbacService svc) =>
+    Results.Ok(await svc.SearchObjectsAsync(new ObjectSearchDto(objectCode, objectName, objectType, objectCodeParent,
+        flagActive, recordStart, recordCount)))).RequireAuthorization();
+
 // Cờ quản trị hệ thống (Sys_User.FlagSysAdmin) — bypass trong deny-check.
 app.MapPost("/api/users/{userKey}/sysadmin", async (string userKey, bool flag, IRbacService svc) =>
     Results.Ok(await svc.SetSysAdminAsync(userKey, flag))).RequireAuthorization();
