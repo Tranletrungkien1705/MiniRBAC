@@ -258,6 +258,13 @@ app.MapGet("/api/groups/{groupCode}/members", async (string groupCode, IRbacServ
 app.MapGet("/api/users/{userKey}/groups", async (string userKey, IRbacService svc) =>
     Results.Ok(await svc.GroupsOfUserAsync(userKey))).RequireAuthorization();
 
+// Sys_Group_Get (nguồn 2010.HTC): màn danh sách/tìm kiếm nhóm quyền có PHÂN TRANG (recordStart/recordCount)
+// + lọc theo cột (groupCode/groupName/flagActive), tùy chọn kèm thành viên nhóm (includeMembers → Sys_UserInGroup
+// + tên user), cùng tổng số dòng khớp (myCount). Khác GET /api/groups (liệt kê đơn giản, không phân trang).
+app.MapGet("/api/groups/search", async (string? groupCode, string? groupName, bool? flagActive,
+    int? recordStart, int? recordCount, bool? includeMembers, IRbacService svc) =>
+    Results.Ok(await svc.SearchGroupsAsync(new GroupSearchDto(groupCode, groupName, flagActive, recordStart, recordCount, includeMembers)))).RequireAuthorization();
+
 // ===== Sys_Access (nguồn 2010.HTC) =====
 // Grant object cho nhóm (Sys_Access_Save): thay TOÀN BỘ grant của nhóm trong 1 thao tác
 // (xóa hết grant cũ rồi ghi danh sách object mới). Chỉ nhận object đang hoạt động.

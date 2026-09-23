@@ -23,6 +23,9 @@ public record DeleteUserResult(bool Ok, string Reason, string UserCode, int Remo
 public record UserSearchDto(string? UserCode, string? DealerCode, string? DeptCode, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive, int? RecordStart, int? RecordCount, bool? IncludeGroups, bool? IncludeTeams);
 // Sys_Access_Get (nguồn 2010.HTC): tìm/liệt kê grant (GroupCode, ObjectCode) có PHÂN TRANG + lọc theo cột.
 public record AccessSearchDto(string? GroupCode, string? ObjectCode, string? ObjectType, bool? ObjectActiveOnly, int? RecordStart, int? RecordCount);
+// Sys_Group_Get (nguồn 2010.HTC): tìm/liệt kê nhóm quyền có PHÂN TRANG + lọc theo cột (groupCode/groupName/flagActive),
+// tùy chọn kèm thành viên nhóm (Sys_UserInGroup + tên user).
+public record GroupSearchDto(string? GroupCode, string? GroupName, bool? FlagActive, int? RecordStart, int? RecordCount, bool? IncludeMembers);
 // Sys_User_Import (nguồn 2010.HTC, SysUserController.Import): 1 dòng dữ liệu import user.
 // Cột theo TblSys_User: UserCode/DealerCode/DeptCode/UserStaffId/UserName/UserPassword/UserEmail/
 // UserPhoneNo/ViewAbilityType/FlagSysAdmin/FlagSaleMan/FlagSMSReceive.
@@ -99,6 +102,8 @@ public interface IRbacService
     Task<object> ImportUsersAsync(List<ImportUserRowDto> rows);
     // Sys_Access_Get (nguồn 2010.HTC): tìm/liệt kê grant (GroupCode, ObjectCode) có phân trang + lọc theo cột
     Task<object> SearchAccessAsync(AccessSearchDto d);
+    // Sys_Group_Get (nguồn 2010.HTC): tìm/liệt kê nhóm quyền có phân trang + tùy chọn kèm thành viên nhóm
+    Task<object> SearchGroupsAsync(GroupSearchDto d);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -1347,6 +1352,61 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         }).ToList();
 
         return new { myCount = total, recordStart = start, recordCount = count, count = items.Count, items };
+    }
+
+    // ===== Sys_Group_Get (nguồn 2010.HTC) =====
+    // Tìm/liệt kê nhóm quyền có PHÂN TRANG (Ft_RecordStart/Ft_RecordCount) + lọc theo cột (Ft_WhereClause),
+    // trả về: (1) danh sách Sys_Group (GroupCode/GroupName/FlagActive); (2) tùy chọn Sys_UserInGroup
+    // (thành viên nhóm + tên user qua left join Sys_User); (3) tổng số dòng khớp (MyCount).
+    // Khác ListGroupsAsync (đã port, liệt kê đơn giản không phân trang, chỉ đếm thành viên) — đây là
+    // màn danh sách/tìm kiếm nhóm đầy đủ theo nguồn.
+    public async Task<object> SearchGroupsAsync(GroupSearchDto d)
+    {
+        // Lọc theo cột (tương đương Ft_WhereClause của nguồn, đã chuẩn hóa về các cột cho phép).
+        var q = db.SysGroups.Where(x => x.OrgId == Org);
+        if (!string.IsNullOrWhiteSpace(d.GroupCode)) { var v = d.GroupCode.Trim().ToUpperInvariant(); q = q.Where(x => x.GroupCode == v); }
+        if (!string.IsNullOrWhiteSpace(d.GroupName)) { var v = d.GroupName.Trim(); q = q.Where(x => x.GroupName == v); }
+        if (d.FlagActive is not null) q = q.Where(x => x.FlagActive == d.FlagActive);
+
+        var total = await q.CountAsync();
+
+        // Phân trang: Ft_RecordStart (0-based) + Ft_RecordCount. Mặc định lấy từ đầu, tối đa 100 dòng.
+        var start = d.RecordStart is > 0 ? d.RecordStart.Value : 0;
+        var count = d.RecordCount is > 0 ? d.RecordCount.Value : 100;
+
+        // Sắp xếp giống nguồn: GroupCode asc.
+        var groups = await q.OrderBy(x => x.GroupCode).Skip(start).Take(count)
+            .Select(x => new { x.GroupCode, x.GroupName, x.FlagActive }).ToListAsync();
+
+        var groupCodes = groups.Select(g => g.GroupCode).ToList();
+
+        // (2) Sys_UserInGroup: thành viên nhóm của các nhóm trong trang (kèm tên user qua left join Sys_User).
+        object? userInGroup = null;
+        if (d.IncludeMembers == true)
+        {
+            userInGroup = await (from uig in db.SysUserInGroups.Where(x => x.OrgId == Org && groupCodes.Contains(x.GroupCode))
+                                 join u in db.SysUserProfiles.Where(x => x.OrgId == Org) on uig.UserCode equals u.UserCode into uj
+                                 from u in uj.DefaultIfEmpty()
+                                 orderby uig.GroupCode, uig.UserCode
+                                 select new
+                                 {
+                                     uig.GroupCode, uig.UserCode,
+                                     su_UserCode = u != null ? u.UserCode : null,
+                                     su_UserName = u != null ? u.UserName : null,
+                                     su_FlagSysAdmin = u != null ? (bool?)u.FlagSysAdmin : null,
+                                     su_FlagActive = u != null ? (bool?)u.FlagActive : null
+                                 }).ToListAsync();
+        }
+
+        return new
+        {
+            myCount = total,
+            recordStart = start,
+            recordCount = count,
+            count = groups.Count,
+            groups,
+            userInGroup
+        };
     }
 
     // CUtils.IsValidEmail (nguồn 2010.HTC): dùng MailAddress để kiểm tra email hợp lệ.
