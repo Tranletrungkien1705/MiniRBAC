@@ -97,6 +97,8 @@ public interface IRbacService
     // Sys_User_Login + Sys_User_ChangePassword (nguồn 2010.HTC)
     Task<object> LoginAsync(string userCode, string password);
     Task<object> ChangePasswordAsync(string userCode, string oldPassword, string newPassword);
+    // Sys_User_Logout (nguồn 2010.HTC): hủy phiên đăng nhập theo SessionId
+    Task<object> LogoutAsync(string sessionId);
     // Sys_User_ResetPass (nguồn 2010.HTC): admin đặt lại mật khẩu user (KHÔNG cần mật khẩu cũ)
     Task<object> ResetPasswordAsync(string userCode, string newPassword);
     // Sys_User_Create (nguồn 2010.HTC): tạo hồ sơ user kèm kiểm tra ràng buộc
@@ -982,14 +984,50 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         if (!string.Equals(password ?? "", user.UserPassword, StringComparison.Ordinal))
             return new { userCode, ok = false, reason = "invalid_password" };
 
+        // Tạo phiên đăng nhập (nguồn: Sys_User_Login dựng CSessionInfo rồi trả SessionId trong Remark).
+        // MiniRBAC sinh SessionId và lưu phiên để Sys_User_Logout hủy theo SessionId.
+        var sessionId = "sess_" + Guid.NewGuid().ToString("N");
+        db.SysUserSessions.Add(new SysUserSession
+        {
+            OrgId = Org,
+            SessionId = sessionId,
+            UserCode = user.UserCode,
+            RootSvCode = "",
+            RootUserCode = "",
+            ServiceCode = "",
+            LanguageCode = "",
+            LoginAt = DateTime.Now,
+            FlagActive = true
+        });
+        await db.SaveChangesAsync();
+
         return new
         {
             userCode,
             ok = true,
             reason = "ok",
+            sessionId,
             user = new { user.UserCode, user.DealerCode, user.DeptCode, user.UserName, user.ViewAbilityType, user.FlagSysAdmin },
             dealer = new { dealer.DealerCode, dealer.DealerName }
         };
+    }
+
+    // ===== Sys_User_Logout (nguồn 2010.HTC) =====
+    // Hủy phiên đăng nhập theo SessionId (nguồn: _cf.sess.Remove(false, strSessionId)).
+    // Phiên phải TỒN TẠI và ĐANG HOẠT ĐỘNG; sau đó đánh dấu FlagActive=false + ghi LogoutAt.
+    // Khác LoginAsync (đã port, tạo phiên) — đây là thao tác đóng phiên.
+    public async Task<object> LogoutAsync(string sessionId)
+    {
+        sessionId = (sessionId ?? "").Trim();
+        if (sessionId.Length == 0) return new { sessionId, ok = false, reason = "invalid_sessionid" };
+        var s = await db.SysUserSessions.FirstOrDefaultAsync(x => x.OrgId == Org && x.SessionId == sessionId);
+        if (s is null) return new { sessionId, ok = false, reason = "session_not_found" };
+        if (!s.FlagActive) return new { sessionId, ok = false, reason = "session_inactive" };
+
+        s.FlagActive = false;
+        s.LogoutAt = DateTime.Now;
+        await db.SaveChangesAsync();
+        return new { sessionId, ok = true, reason = "ok", userCode = s.UserCode };
     }
 
     // ===== Sys_User_ChangePassword (nguồn 2010.HTC) =====

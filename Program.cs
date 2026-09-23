@@ -348,6 +348,14 @@ app.MapPost("/api/login", async (LoginDto d, IRbacService svc) =>
 app.MapPost("/api/users/{userKey}/changepassword", async (string userKey, ChangePasswordDto d, IRbacService svc) =>
     Results.Ok(await svc.ChangePasswordAsync(userKey, d.OldPassword ?? "", d.NewPassword ?? ""))).RequireAuthorization();
 
+// ===== Sys_User_Logout (nguồn 2010.HTC) =====
+// Hủy phiên đăng nhập theo SessionId (nguồn: _cf.sess.Remove(false, strSessionId)).
+// Phiên phải tồn tại + đang hoạt động; sau đó đánh dấu FlagActive=false + ghi LogoutAt.
+// Đối trọng của POST /api/login (đã port, tạo phiên).
+app.MapPost("/api/logout", async (LogoutDto d, IRbacService svc) =>
+    string.IsNullOrWhiteSpace(d.SessionId) ? Results.BadRequest(new { error = "Cần SessionId." })
+        : Results.Ok(await svc.LogoutAsync(d.SessionId)));
+
 // ===== Sys_User_ResetPass (nguồn 2010.HTC) =====
 // Admin đặt lại mật khẩu user (SysUserController.ResetPass → Sys_User_Update với Ft_Cols_Upd="Sys_User.UserPassword"):
 // cập nhật PARTIAL CHỈ cột mật khẩu, KHÔNG cần mật khẩu cũ. User phải tồn tại; mật khẩu mới khác rỗng.
@@ -414,5 +422,6 @@ record ResolveObjectsDto(List<string> ObjectCodes);
 record ImportUserRoleDto(string? UserCode, string? FlagSysAdmin, string? FlagSysViewer);
 record GroupAccessDto(List<string> ObjectCodes);
 record LoginDto(string UserCode, string? Password);
+record LogoutDto(string? SessionId);
 record ChangePasswordDto(string? OldPassword, string? NewPassword);
 record ResetPasswordDto(string? NewPassword);

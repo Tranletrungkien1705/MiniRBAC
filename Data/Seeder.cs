@@ -146,6 +146,14 @@ public static class Seeder
                 new MstAreaMarket { OrgId = org, AreaCode = "MB", AreaName = "Miền Bắc", AreaCodeParent = "VN", AreaBUCode = "VN.MB", AreaBUPattern = "VN.MB%", AreaStatus = "1" },
                 new MstAreaMarket { OrgId = org, AreaCode = "MN", AreaName = "Miền Nam", AreaCodeParent = "VN", AreaBUCode = "VN.MN", AreaBUPattern = "VN.MN%", AreaStatus = "1" });
         }
+        // Phiên đăng nhập (Session nguồn 2010.HTC) — dùng cho Sys_User_Logout.
+        // Nguồn KHÔNG có script seed cho bảng này (phiên sinh động khi login) nên dùng 1 phiên
+        // minh họa đang hoạt động, khớp user đã seed ở trên (admin@demo).
+        if (!await db.SysUserSessions.AnyAsync())
+        {
+            db.SysUserSessions.Add(
+                new SysUserSession { OrgId = org, SessionId = "sess_demo_admin", UserCode = "admin@demo", LoginAt = DateTime.Now, FlagActive = true });
+        }
         await db.SaveChangesAsync();
     }
 }

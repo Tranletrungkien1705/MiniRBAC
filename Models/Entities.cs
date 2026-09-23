@@ -245,6 +245,27 @@ public sealed class SysUserInTeam
 }
 
 /// <summary>
+/// Phiên đăng nhập (Session nguồn 2010.HTC) — dùng cho Sys_User_Login / Sys_User_Logout.
+/// Khóa nghiệp vụ = SessionId. Nguồn: Sys_User_Login tạo CSessionInfo (RootSvCode/RootUserCode/
+/// ServiceCode/UserCode/LanguageCode) và Sys_User_Logout gọi _cf.sess.Remove(false, strSessionId)
+/// để hủy phiên theo SessionId. FlagActive: phiên còn hiệu lực (chưa logout).
+/// </summary>
+public sealed class SysUserSession
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string SessionId { get; set; } = "";
+    public string UserCode { get; set; } = "";
+    public string RootSvCode { get; set; } = "";
+    public string RootUserCode { get; set; } = "";
+    public string ServiceCode { get; set; } = "";
+    public string LanguageCode { get; set; } = "";
+    public DateTime LoginAt { get; set; } = DateTime.Now;
+    public DateTime? LogoutAt { get; set; }
+    public bool FlagActive { get; set; } = true;
+}
+
+/// <summary>
 /// Khả năng nhìn dữ liệu của user (Sys_User_GetAbilityViewOfUser nguồn 2010.HTC).
 /// Khóa nghiệp vụ = UserCode. Là "ability of user" dùng để tính tập user được XEM/GHI
 /// trong Sys_User_GetByViewAbility. ViewAbilityType: ADMIN/ALL/TEAM/USER (TConst.ViewAbilityType).
