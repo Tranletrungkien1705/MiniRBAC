@@ -10,6 +10,8 @@ public record AssignDto(string RoleCode);
 public record SysObjectDto(string ObjectCode, string ObjectName, string? ObjectType, string? ObjectCodeParent, bool? FlagActive);
 public record UserTeamDto(string TeamCode, string DealerCode, string TeamName, bool? FlagActive);
 public record UserScopeDto(string UserKey, string? DealerCode, string? DBCode, string? TeamCode, bool? FlagSysAdmin, bool? FlagDBAdmin, bool? FlagTeamLeader, bool? FlagSalesman);
+public record GroupDto(string GroupCode, string GroupName, bool? FlagActive);
+public record GroupMembersDto(List<string> UserCodes);
 
 public interface IRbacService
 {
@@ -34,6 +36,12 @@ public interface IRbacService
     Task<object> ListTeamsAsync(string? dealerCode, bool? activeOnly);
     Task<object> SetUserScopeAsync(UserScopeDto d);
     Task<object> ViewAbilityAsync(string userKey);
+    // Sys_Group + Sys_UserInGroup (nguồn 2010.HTC)
+    Task<object> AddGroupAsync(GroupDto d);
+    Task<object> ListGroupsAsync(bool? activeOnly);
+    Task<object?> SetGroupMembersAsync(string groupCode, List<string> userCodes);
+    Task<object?> ListGroupMembersAsync(string groupCode);
+    Task<object> GroupsOfUserAsync(string userCode);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -293,5 +301,66 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
             write = new List<string>();
         }
         return new { userKey, scope, read, write };
+    }
+
+    // ===== Sys_Group + Sys_UserInGroup (nguồn 2010.HTC) =====
+    // Nhóm quyền: khóa GroupCode, FlagActive (chỉ nhóm hoạt động mới tính khi check quyền).
+    public async Task<object> AddGroupAsync(GroupDto d)
+    {
+        var code = d.GroupCode.Trim().ToUpperInvariant();
+        var g = await db.SysGroups.FirstOrDefaultAsync(x => x.OrgId == Org && x.GroupCode == code);
+        if (g is null) { g = new SysGroup { OrgId = Org, GroupCode = code }; db.SysGroups.Add(g); }
+        g.GroupName = d.GroupName.Trim();
+        g.FlagActive = d.FlagActive ?? true;
+        await db.SaveChangesAsync();
+        return new { g.GroupCode, g.GroupName, g.FlagActive };
+    }
+
+    public async Task<object> ListGroupsAsync(bool? activeOnly)
+    {
+        var q = db.SysGroups.Where(x => x.OrgId == Org);
+        if (activeOnly == true) q = q.Where(x => x.FlagActive);
+        var items = await q.OrderBy(x => x.GroupCode).Select(x => new
+        {
+            x.GroupCode, x.GroupName, x.FlagActive,
+            members = db.SysUserInGroups.Count(m => m.OrgId == Org && m.GroupCode == x.GroupCode)
+        }).ToListAsync();
+        return new { count = items.Count, items };
+    }
+
+    // Sys_UserInGroup_Save (nguồn 2010.HTC): thay TOÀN BỘ thành viên của nhóm trong 1 thao tác
+    // (xóa hết thành viên cũ rồi ghi danh sách mới). Trả null nếu nhóm không tồn tại.
+    public async Task<object?> SetGroupMembersAsync(string groupCode, List<string> userCodes)
+    {
+        groupCode = groupCode.Trim().ToUpperInvariant();
+        if (!await db.SysGroups.AnyAsync(x => x.OrgId == Org && x.GroupCode == groupCode)) return null;
+        var old = await db.SysUserInGroups.Where(x => x.OrgId == Org && x.GroupCode == groupCode).ToListAsync();
+        db.SysUserInGroups.RemoveRange(old);
+        var wanted = (userCodes ?? new List<string>())
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Select(u => u.Trim()).Distinct().ToList();
+        foreach (var u in wanted)
+            db.SysUserInGroups.Add(new SysUserInGroup { OrgId = Org, GroupCode = groupCode, UserCode = u });
+        await db.SaveChangesAsync();
+        return new { groupCode, members = wanted };
+    }
+
+    public async Task<object?> ListGroupMembersAsync(string groupCode)
+    {
+        groupCode = groupCode.Trim().ToUpperInvariant();
+        var g = await db.SysGroups.FirstOrDefaultAsync(x => x.OrgId == Org && x.GroupCode == groupCode);
+        if (g is null) return null;
+        var members = await db.SysUserInGroups.Where(x => x.OrgId == Org && x.GroupCode == groupCode)
+            .Select(x => x.UserCode).OrderBy(x => x).ToListAsync();
+        return new { g.GroupCode, g.GroupName, g.FlagActive, members };
+    }
+
+    // Các nhóm mà user thuộc về (Sys_UserInGroup) — cầu nối user → nhóm → Sys_Access.
+    public async Task<object> GroupsOfUserAsync(string userCode)
+    {
+        userCode = userCode.Trim();
+        var groups = await db.SysUserInGroups.Where(x => x.OrgId == Org && x.UserCode == userCode)
+            .Select(x => x.GroupCode).OrderBy(x => x).ToListAsync();
+        return new { userCode, groups };
     }
 }

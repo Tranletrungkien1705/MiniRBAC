@@ -52,6 +52,18 @@ public static class Seeder
                 new SysUserScope { OrgId = org, UserKey = "leader01@demo", DealerCode = "DL01", DBCode = "ROOT", TeamCode = "TEAM01", FlagTeamLeader = true },
                 new SysUserScope { OrgId = org, UserKey = "sale01@demo", DealerCode = "DL01", DBCode = "ROOT", TeamCode = "TEAM01", FlagSalesman = true });
         }
+        // Nhóm quyền (Sys_Group) + thành viên nhóm (Sys_UserInGroup nguồn 2010.HTC).
+        // Nguồn KHÔNG có script seed cho 2 bảng này nên dùng dữ liệu minh họa theo đúng mô hình cột.
+        if (!await db.SysGroups.AnyAsync())
+        {
+            db.SysGroups.AddRange(
+                new SysGroup { OrgId = org, GroupCode = "GRP_SALES", GroupName = "Nhóm bán hàng" },
+                new SysGroup { OrgId = org, GroupCode = "GRP_ADMIN", GroupName = "Nhóm quản trị" });
+            db.SysUserInGroups.AddRange(
+                new SysUserInGroup { OrgId = org, GroupCode = "GRP_SALES", UserCode = "sale01@demo" },
+                new SysUserInGroup { OrgId = org, GroupCode = "GRP_SALES", UserCode = "leader01@demo" },
+                new SysUserInGroup { OrgId = org, GroupCode = "GRP_ADMIN", UserCode = "admin@demo" });
+        }
         await db.SaveChangesAsync();
     }
 }

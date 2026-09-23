@@ -105,3 +105,28 @@ public sealed class SysUserScope
     public bool FlagSalesman { get; set; }
     public bool FlagActive { get; set; } = true;
 }
+
+/// <summary>
+/// Nhóm quyền (Sys_Group nguồn 2010.HTC). Khóa nghiệp vụ = GroupCode.
+/// FlagActive: chỉ nhóm đang hoạt động mới được tính khi kiểm tra quyền (Sys_Access_CheckDeny).
+/// </summary>
+public sealed class SysGroup
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string GroupCode { get; set; } = "";
+    public string GroupName { get; set; } = "";
+    public bool FlagActive { get; set; } = true;
+}
+
+/// <summary>
+/// Thành viên nhóm (Sys_UserInGroup nguồn 2010.HTC). Khóa nghiệp vụ = (GroupCode, UserCode).
+/// Là cầu nối user → nhóm → Sys_Access → object trong Sys_Access_CheckDeny.
+/// </summary>
+public sealed class SysUserInGroup
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string GroupCode { get; set; } = "";
+    public string UserCode { get; set; } = "";
+}

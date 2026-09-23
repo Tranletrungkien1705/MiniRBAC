@@ -175,6 +175,29 @@ app.MapPost("/api/users/{userKey}/scope", async (string userKey, UserScopeDto d,
 app.MapGet("/api/users/{userKey}/viewability", async (string userKey, IRbacService svc) =>
     Results.Ok(await svc.ViewAbilityAsync(userKey))).RequireAuthorization();
 
+// ===== Sys_Group + Sys_UserInGroup (nguồn 2010.HTC) =====
+// Nhóm quyền: khóa GroupCode, FlagActive (chỉ nhóm hoạt động mới tính khi check quyền).
+app.MapPost("/api/groups", async (GroupDto d, IRbacService svc) =>
+    string.IsNullOrWhiteSpace(d.GroupCode) ? Results.BadRequest(new { error = "Cần GroupCode." }) : Results.Ok(await svc.AddGroupAsync(d))).RequireAuthorization();
+app.MapGet("/api/groups", async (bool? activeOnly, IRbacService svc) =>
+    Results.Ok(await svc.ListGroupsAsync(activeOnly))).RequireAuthorization();
+
+// Thành viên nhóm (Sys_UserInGroup_Save): thay TOÀN BỘ thành viên của nhóm trong 1 thao tác.
+app.MapPut("/api/groups/{groupCode}/members", async (string groupCode, GroupMembersDto d, IRbacService svc) =>
+{
+    var r = await svc.SetGroupMembersAsync(groupCode, d.UserCodes);
+    return r is null ? Results.NotFound(new { error = "Nhóm không tồn tại." }) : Results.Ok(r);
+}).RequireAuthorization();
+app.MapGet("/api/groups/{groupCode}/members", async (string groupCode, IRbacService svc) =>
+{
+    var r = await svc.ListGroupMembersAsync(groupCode);
+    return r is null ? Results.NotFound(new { error = "Nhóm không tồn tại." }) : Results.Ok(r);
+}).RequireAuthorization();
+
+// Các nhóm mà user thuộc về (Sys_UserInGroup).
+app.MapGet("/api/users/{userKey}/groups", async (string userKey, IRbacService svc) =>
+    Results.Ok(await svc.GroupsOfUserAsync(userKey))).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });
