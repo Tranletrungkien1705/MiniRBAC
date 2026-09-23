@@ -113,6 +113,23 @@ app.MapGet("/api/users/{userKey}/permissions", async (string userKey, IRbacServi
 app.MapGet("/api/check", async (string user, string permission, IRbacService svc) =>
     Results.Ok(await svc.CheckAsync(user, permission))).RequireAuthorization();
 
+// ===== Sys_Object catalog + Sys_Access_CheckDeny (nguồn 2010.HTC) =====
+// Danh mục đối tượng/chức năng: ObjectType (MENU/SCR/BTN/WS/WSFUNC/APP), cây theo ObjectCodeParent, FlagActive.
+app.MapPost("/api/objects", async (SysObjectDto d, IRbacService svc) =>
+    string.IsNullOrWhiteSpace(d.ObjectCode) ? Results.BadRequest(new { error = "Cần ObjectCode." }) : Results.Ok(await svc.AddObjectAsync(d))).RequireAuthorization();
+app.MapGet("/api/objects", async (string? type, bool? activeOnly, IRbacService svc) =>
+    Results.Ok(await svc.ListObjectsAsync(type, activeOnly))).RequireAuthorization();
+app.MapGet("/api/objects/tree", async (IRbacService svc) => Results.Ok(await svc.ObjectTreeAsync())).RequireAuthorization();
+
+// Cờ quản trị hệ thống (Sys_User.FlagSysAdmin) — bypass trong deny-check.
+app.MapPost("/api/users/{userKey}/sysadmin", async (string userKey, bool flag, IRbacService svc) =>
+    Results.Ok(await svc.SetSysAdminAsync(userKey, flag))).RequireAuthorization();
+
+// Deny-check (Sys_Access_CheckDeny): user được phép object khi thuộc role có grant object ĐANG HOẠT ĐỘNG,
+// hoặc có FlagSysAdmin. Object không hoạt động => luôn chặn.
+app.MapGet("/api/checkdeny", async (string user, string objectCode, IRbacService svc) =>
+    Results.Ok(await svc.CheckDenyAsync(user, objectCode))).RequireAuthorization();
+
 // Import hàng loạt Role thật từ Sys_Group + gán UserRole thật cho user có FlagSysAdmin/FlagSysViewer
 // (SQL nguồn 2010.HTC). Sys_Function ở nguồn RỖNG (0 dòng) nên KHÔNG import Permission/RolePermission —
 // không suy diễn dữ liệu không có thật.
