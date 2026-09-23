@@ -273,6 +273,13 @@ app.MapPost("/api/users", async (CreateUserDto d, IRbacService svc) =>
     string.IsNullOrWhiteSpace(d.UserCode) ? Results.BadRequest(new { error = "Cần UserCode." })
         : Results.Ok(await svc.CreateUserAsync(d))).RequireAuthorization();
 
+// ===== Sys_User_Update (nguồn 2010.HTC) =====
+// Cập nhật hồ sơ user (partial theo Cols = Ft_Cols_Upd; rỗng = tất cả cột cho phép) kèm kiểm tra ràng buộc:
+// user phải tồn tại; ViewAbilityType/UserName bắt buộc khi cập nhật; UserStaffId (nếu cập nhật, khác rỗng)
+// phải duy nhất theo đại lý. DealerCode/DeptCode KHÔNG cập nhật (giống nguồn).
+app.MapPut("/api/users/{userKey}", async (string userKey, UpdateUserDto d, IRbacService svc) =>
+    Results.Ok(await svc.UpdateUserAsync(userKey, d))).RequireAuthorization();
+
 // ===== Sys_User_Delete (nguồn 2010.HTC) =====
 // Xóa hồ sơ user kèm dọn liên kết: xóa mọi dòng Sys_UserInGroup và Sys_UserInTeam của user,
 // rồi xóa dòng Sys_User. User phải tồn tại (Sys_User_CheckDB, Flag.Yes).

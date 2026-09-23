@@ -14,6 +14,7 @@ public record GroupDto(string GroupCode, string GroupName, bool? FlagActive);
 public record GroupMembersDto(List<string> UserCodes);
 public record ViewAbilityDto(string UserCode, string? DealerCode, string? DealerBUPattern, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive);
 public record CreateUserDto(string UserCode, string? DealerCode, string? DeptCode, string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin);
+public record UpdateUserDto(string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive, List<string>? Cols);
 public record DeleteUserResult(bool Ok, string Reason, string UserCode, int RemovedGroups, int RemovedTeams);
 
 public interface IRbacService
@@ -65,6 +66,8 @@ public interface IRbacService
     Task<object> ChangePasswordAsync(string userCode, string oldPassword, string newPassword);
     // Sys_User_Create (nguồn 2010.HTC): tạo hồ sơ user kèm kiểm tra ràng buộc
     Task<object> CreateUserAsync(CreateUserDto d);
+    // Sys_User_Update (nguồn 2010.HTC): cập nhật hồ sơ user (partial theo Ft_Cols_Upd) kèm kiểm tra ràng buộc
+    Task<object> UpdateUserAsync(string userCode, UpdateUserDto d);
     // Sys_User_Delete (nguồn 2010.HTC): xóa hồ sơ user + dọn thành viên nhóm/đội của user
     Task<DeleteUserResult> DeleteUserAsync(string userCode);
 }
@@ -798,6 +801,56 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         db.SysUserProfiles.Add(u);
         await db.SaveChangesAsync();
         return new { ok = true, reason = "ok", user = new { u.UserCode, u.DealerCode, u.DeptCode, u.UserStaffId, u.UserName, u.ViewAbilityType, u.FlagSysAdmin, u.FlagActive } };
+    }
+
+    // ===== Sys_User_Update (nguồn 2010.HTC) =====
+    // Cập nhật hồ sơ user (partial theo Ft_Cols_Upd) kèm kiểm tra ràng buộc giống nguồn:
+    //  (1) Sys_User_CheckDB(Flag.Yes): user phải TỒN TẠI, nếu không trả reason user_not_found;
+    //  (2) DealerCode KHÔNG cập nhật — lấy từ DB (nguồn gán lại strDealerCode = dtDB_Sys_User.DealerCode);
+    //  (3) nếu cập nhật ViewAbilityType thì phải KHÁC RỖNG (Sys_User_Update_InvalidViewAbilityType);
+    //  (4) nếu cập nhật UserName thì phải KHÁC RỖNG (Sys_User_Update_InvalidUserName);
+    //  (5) nếu cập nhật UserStaffId và khác rỗng thì phải DUY NHẤT theo đại lý
+    //      (Sys_User_Update_InvalidUserStaffId) — bỏ qua chính user đang sửa.
+    // Chỉ ghi các cột có trong Cols (Ft_Cols_Upd); Cols rỗng/null = cập nhật tất cả cột cho phép.
+    public async Task<object> UpdateUserAsync(string userCode, UpdateUserDto d)
+    {
+        userCode = (userCode ?? "").Trim();
+        var user = await db.SysUserProfiles.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserCode == userCode);
+        if (user is null) return new { ok = false, reason = "user_not_found", userCode };
+
+        // Ft_Cols_Upd: danh sách cột cần cập nhật (rỗng = tất cả). So khớp không phân biệt hoa/thường.
+        var cols = (d.Cols ?? new List<string>())
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim().ToUpperInvariant()).ToHashSet();
+        bool Upd(string col) => cols.Count == 0 || cols.Contains(col.ToUpperInvariant());
+
+        var staffId = (d.UserStaffId ?? "").Trim();
+        var userName = (d.UserName ?? "").Trim();
+        var viewAbilityType = (d.ViewAbilityType ?? "").Trim().ToUpperInvariant();
+
+        // (3) ViewAbilityType bắt buộc khi cập nhật.
+        if (Upd("ViewAbilityType") && viewAbilityType.Length == 0)
+            return new { ok = false, reason = "invalid_viewabilitytype", userCode };
+        // (4) UserName bắt buộc khi cập nhật.
+        if (Upd("UserName") && userName.Length == 0)
+            return new { ok = false, reason = "invalid_username", userCode };
+        // (5) UserStaffId duy nhất theo đại lý (bỏ qua chính user đang sửa).
+        if (Upd("UserStaffId") && staffId.Length > 0
+            && await db.SysUserProfiles.AnyAsync(x => x.OrgId == Org && x.DealerCode == user.DealerCode && x.UserStaffId == staffId && x.UserCode != userCode))
+            return new { ok = false, reason = "staffid_exist", userStaffId = staffId, dealerCode = user.DealerCode };
+
+        // Ghi các cột được chọn (DealerCode/DeptCode KHÔNG cập nhật — giống nguồn).
+        if (Upd("UserStaffId")) user.UserStaffId = staffId;
+        if (Upd("UserName")) user.UserName = userName;
+        if (Upd("UserPassword")) user.UserPassword = d.UserPassword ?? "";
+        if (Upd("UserEmail")) user.UserEmail = (d.UserEmail ?? "").Trim();
+        if (Upd("UserPhoneNo")) user.UserPhoneNo = (d.UserPhoneNo ?? "").Trim();
+        if (Upd("ViewAbilityType")) user.ViewAbilityType = viewAbilityType;
+        if (Upd("FlagSysAdmin")) user.FlagSysAdmin = d.FlagSysAdmin ?? false;
+        if (Upd("FlagActive")) user.FlagActive = d.FlagActive ?? true;
+
+        await db.SaveChangesAsync();
+        return new { ok = true, reason = "ok", user = new { user.UserCode, user.DealerCode, user.DeptCode, user.UserStaffId, user.UserName, user.UserEmail, user.UserPhoneNo, user.ViewAbilityType, user.FlagSysAdmin, user.FlagActive } };
     }
 
     // ===== Sys_User_Delete (nguồn 2010.HTC) =====
