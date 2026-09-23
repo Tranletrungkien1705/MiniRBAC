@@ -210,6 +210,13 @@ app.MapGet("/api/teams/{teamCode}/{dealerCode}/members", async (string teamCode,
     return r is null ? Results.NotFound(new { error = "Đội không tồn tại." }) : Results.Ok(r);
 }).RequireAuthorization();
 
+// Sys_UserTeam_Get (nguồn 2010.HTC): màn danh sách/tìm kiếm đội bán hàng có PHÂN TRANG (recordStart/recordCount)
+// + lọc theo cột (teamCode/dealerCode/teamName/flagActive), tùy chọn kèm thành viên đội (includeMembers →
+// Sys_UserInTeam + tên/cờ user), cùng tổng số dòng khớp (myCount). Khác GET /api/teams (liệt kê đơn giản, không phân trang).
+app.MapGet("/api/teams/search", async (string? teamCode, string? dealerCode, string? teamName, bool? flagActive,
+    int? recordStart, int? recordCount, bool? includeMembers, IRbacService svc) =>
+    Results.Ok(await svc.SearchTeamsAsync(new TeamSearchDto(teamCode, dealerCode, teamName, flagActive, recordStart, recordCount, includeMembers)))).RequireAuthorization();
+
 // Phạm vi dữ liệu user (Sys_User): cờ vai trò + vị trí.
 app.MapPost("/api/users/{userKey}/scope", async (string userKey, UserScopeDto d, IRbacService svc) =>
     Results.Ok(await svc.SetUserScopeAsync(d with { UserKey = userKey }))).RequireAuthorization();
