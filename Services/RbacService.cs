@@ -37,6 +37,9 @@ public interface IRbacService
     Task<object> ListTeamsAsync(string? dealerCode, bool? activeOnly);
     Task<object> SetUserScopeAsync(UserScopeDto d);
     Task<object> ViewAbilityAsync(string userKey);
+    // Sys_UserInTeam_Save (nguồn 2010.HTC): thay TOÀN BỘ thành viên của đội trong 1 thao tác
+    Task<object?> SetTeamMembersAsync(string teamCode, string dealerCode, List<string> userCodes);
+    Task<object?> ListTeamMembersAsync(string teamCode, string dealerCode);
     // Sys_Group + Sys_UserInGroup (nguồn 2010.HTC)
     Task<object> AddGroupAsync(GroupDto d);
     Task<object> ListGroupsAsync(bool? activeOnly);
@@ -310,6 +313,52 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
             write = new List<string>();
         }
         return new { userKey, scope, read, write };
+    }
+
+    // ===== Sys_UserInTeam_Save (nguồn 2010.HTC) =====
+    // Thay TOÀN BỘ thành viên của đội (TeamCode, DealerCode) trong 1 thao tác:
+    // xóa hết thành viên cũ của đội rồi ghi danh sách mới. Trả null nếu đội không tồn tại.
+    // Ràng buộc nghiệp vụ nguồn (Sys_UserInTeam_Save_InvalidOneUserOneTeam): mỗi user chỉ thuộc
+    // MỘT đội duy nhất — nếu sau khi ghi có user nằm ở >1 đội thì từ chối toàn bộ thao tác.
+    public async Task<object?> SetTeamMembersAsync(string teamCode, string dealerCode, List<string> userCodes)
+    {
+        teamCode = teamCode.Trim().ToUpperInvariant();
+        dealerCode = dealerCode.Trim().ToUpperInvariant();
+        if (!await db.SysUserTeams.AnyAsync(x => x.OrgId == Org && x.TeamCode == teamCode && x.DealerCode == dealerCode))
+            return null;
+
+        var wanted = (userCodes ?? new List<string>())
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Select(u => u.Trim()).Distinct().ToList();
+
+        // Thay toàn bộ: xóa thành viên cũ của đội rồi ghi danh sách mới.
+        var old = await db.SysUserInTeams.Where(x => x.OrgId == Org && x.TeamCode == teamCode && x.DealerCode == dealerCode).ToListAsync();
+        db.SysUserInTeams.RemoveRange(old);
+        foreach (var u in wanted)
+            db.SysUserInTeams.Add(new SysUserInTeam { OrgId = Org, UserCode = u, TeamCode = teamCode, DealerCode = dealerCode });
+
+        // Kiểm tra ràng buộc 1-user-1-đội trên trạng thái sau khi ghi (chưa lưu).
+        var all = await db.SysUserInTeams.Where(x => x.OrgId == Org).ToListAsync();
+        var pending = all.Where(x => !(x.TeamCode == teamCode && x.DealerCode == dealerCode)).ToList();
+        pending.AddRange(wanted.Select(u => new SysUserInTeam { OrgId = Org, UserCode = u, TeamCode = teamCode, DealerCode = dealerCode }));
+        var dup = pending.GroupBy(x => x.UserCode).FirstOrDefault(g => g.Select(x => x.TeamCode + "|" + x.DealerCode).Distinct().Count() > 1);
+        if (dup is not null)
+            return new { error = "one_user_one_team", userCode = dup.Key, teams = dup.Select(x => new { x.TeamCode, x.DealerCode }).Distinct().ToList() };
+
+        await db.SaveChangesAsync();
+        return new { teamCode, dealerCode, members = wanted };
+    }
+
+    // Sys_UserTeam_Get: danh sách thành viên của đội (kèm tên user nếu có hồ sơ Sys_User).
+    public async Task<object?> ListTeamMembersAsync(string teamCode, string dealerCode)
+    {
+        teamCode = teamCode.Trim().ToUpperInvariant();
+        dealerCode = dealerCode.Trim().ToUpperInvariant();
+        var t = await db.SysUserTeams.FirstOrDefaultAsync(x => x.OrgId == Org && x.TeamCode == teamCode && x.DealerCode == dealerCode);
+        if (t is null) return null;
+        var members = await db.SysUserInTeams.Where(x => x.OrgId == Org && x.TeamCode == teamCode && x.DealerCode == dealerCode)
+            .Select(x => x.UserCode).OrderBy(x => x).ToListAsync();
+        return new { t.TeamCode, t.DealerCode, t.TeamName, t.FlagActive, members };
     }
 
     // ===== Sys_Group + Sys_UserInGroup (nguồn 2010.HTC) =====

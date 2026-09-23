@@ -167,6 +167,20 @@ app.MapPost("/api/teams", async (UserTeamDto d, IRbacService svc) =>
 app.MapGet("/api/teams", async (string? dealerCode, bool? activeOnly, IRbacService svc) =>
     Results.Ok(await svc.ListTeamsAsync(dealerCode, activeOnly))).RequireAuthorization();
 
+// Thành viên đội (Sys_UserInTeam_Save): thay TOÀN BỘ thành viên của đội trong 1 thao tác.
+// Ràng buộc nguồn: mỗi user chỉ thuộc MỘT đội duy nhất (one-user-one-team).
+app.MapPut("/api/teams/{teamCode}/{dealerCode}/members", async (string teamCode, string dealerCode, GroupMembersDto d, IRbacService svc) =>
+{
+    var r = await svc.SetTeamMembersAsync(teamCode, dealerCode, d.UserCodes);
+    if (r is null) return Results.NotFound(new { error = "Đội không tồn tại." });
+    return Results.Ok(r);
+}).RequireAuthorization();
+app.MapGet("/api/teams/{teamCode}/{dealerCode}/members", async (string teamCode, string dealerCode, IRbacService svc) =>
+{
+    var r = await svc.ListTeamMembersAsync(teamCode, dealerCode);
+    return r is null ? Results.NotFound(new { error = "Đội không tồn tại." }) : Results.Ok(r);
+}).RequireAuthorization();
+
 // Phạm vi dữ liệu user (Sys_User): cờ vai trò + vị trí.
 app.MapPost("/api/users/{userKey}/scope", async (string userKey, UserScopeDto d, IRbacService svc) =>
     Results.Ok(await svc.SetUserScopeAsync(d with { UserKey = userKey }))).RequireAuthorization();
