@@ -253,6 +253,14 @@ app.MapPost("/api/login", async (LoginDto d, IRbacService svc) =>
 app.MapPost("/api/users/{userKey}/changepassword", async (string userKey, ChangePasswordDto d, IRbacService svc) =>
     Results.Ok(await svc.ChangePasswordAsync(userKey, d.OldPassword ?? "", d.NewPassword ?? ""))).RequireAuthorization();
 
+// ===== Sys_User_Create (nguồn 2010.HTC) =====
+// Tạo hồ sơ user mới kèm kiểm tra ràng buộc: UserCode bắt buộc + chưa tồn tại; DealerCode phải tồn tại;
+// DeptCode phải tồn tại + đang hoạt động theo đại lý; UserStaffId (nếu có) duy nhất theo đại lý;
+// ViewAbilityType/UserName/UserPassword bắt buộc. Ghi với FlagActive='1'.
+app.MapPost("/api/users", async (CreateUserDto d, IRbacService svc) =>
+    string.IsNullOrWhiteSpace(d.UserCode) ? Results.BadRequest(new { error = "Cần UserCode." })
+        : Results.Ok(await svc.CreateUserAsync(d))).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });

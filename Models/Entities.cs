@@ -156,10 +156,27 @@ public sealed class SysUserProfile
     public string UserCode { get; set; } = "";
     public string DealerCode { get; set; } = "";
     public string DeptCode { get; set; } = "";
+    public string UserStaffId { get; set; } = "";   // mã nhân viên (Sys_User.UserStaffId) — duy nhất theo đại lý
     public string UserName { get; set; } = "";
     public string UserPassword { get; set; } = "";
+    public string UserEmail { get; set; } = "";
+    public string UserPhoneNo { get; set; } = "";
     public string? ViewAbilityType { get; set; }
     public bool FlagSysAdmin { get; set; }
+    public bool FlagActive { get; set; } = true;
+}
+
+/// <summary>
+/// Phòng ban (Mst_Department nguồn 2010.HTC) — dùng cho Sys_User_Create (Mst_Department_CheckDB).
+/// Khóa nghiệp vụ = (DeptCode, DealerCode). FlagActive: chỉ phòng ban đang hoạt động mới cho gán user.
+/// </summary>
+public sealed class MstDepartment
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string DeptCode { get; set; } = "";
+    public string DealerCode { get; set; } = "";
+    public string DeptName { get; set; } = "";
     public bool FlagActive { get; set; } = true;
 }
 

@@ -13,6 +13,7 @@ public record UserScopeDto(string UserKey, string? DealerCode, string? DBCode, s
 public record GroupDto(string GroupCode, string GroupName, bool? FlagActive);
 public record GroupMembersDto(List<string> UserCodes);
 public record ViewAbilityDto(string UserCode, string? DealerCode, string? DealerBUPattern, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive);
+public record CreateUserDto(string UserCode, string? DealerCode, string? DeptCode, string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin);
 
 public interface IRbacService
 {
@@ -57,6 +58,8 @@ public interface IRbacService
     // Sys_User_Login + Sys_User_ChangePassword (nguồn 2010.HTC)
     Task<object> LoginAsync(string userCode, string password);
     Task<object> ChangePasswordAsync(string userCode, string oldPassword, string newPassword);
+    // Sys_User_Create (nguồn 2010.HTC): tạo hồ sơ user kèm kiểm tra ràng buộc
+    Task<object> CreateUserAsync(CreateUserDto d);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -690,5 +693,55 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         user.UserPassword = newPassword;
         await db.SaveChangesAsync();
         return new { userCode, ok = true, reason = "ok" };
+    }
+
+    // ===== Sys_User_Create (nguồn 2010.HTC) =====
+    // Tạo hồ sơ user mới kèm kiểm tra ràng buộc giống nguồn:
+    //  (1) UserCode bắt buộc; (2) UserCode CHƯA tồn tại (Sys_User_CheckDB, Flag.Inactive);
+    //  (3) DealerCode phải TỒN TẠI (Mst_Dealer_CheckDB, Flag.Yes);
+    //  (4) DeptCode phải TỒN TẠI và ĐANG HOẠT ĐỘNG theo đại lý (Mst_Department_CheckDB);
+    //  (5) UserStaffId (nếu có) phải DUY NHẤT theo đại lý; (6) ViewAbilityType bắt buộc;
+    //  (7) UserName bắt buộc; (8) UserPassword bắt buộc. Ghi với FlagActive='1'.
+    public async Task<object> CreateUserAsync(CreateUserDto d)
+    {
+        var userCode = (d.UserCode ?? "").Trim();
+        var dealerCode = (d.DealerCode ?? "").Trim().ToUpperInvariant();
+        var deptCode = (d.DeptCode ?? "").Trim().ToUpperInvariant();
+        var staffId = (d.UserStaffId ?? "").Trim();
+        var userName = (d.UserName ?? "").Trim();
+        var password = d.UserPassword ?? "";
+        var viewAbilityType = (d.ViewAbilityType ?? "").Trim().ToUpperInvariant();
+
+        if (userCode.Length == 0) return new { ok = false, reason = "invalid_usercode" };
+        if (await db.SysUserProfiles.AnyAsync(x => x.OrgId == Org && x.UserCode == userCode))
+            return new { ok = false, reason = "usercode_exist", userCode };
+        if (!await db.MstDealers.AnyAsync(x => x.OrgId == Org && x.DealerCode == dealerCode))
+            return new { ok = false, reason = "dealer_not_found", dealerCode };
+        if (!await db.MstDepartments.AnyAsync(x => x.OrgId == Org && x.DeptCode == deptCode && x.DealerCode == dealerCode && x.FlagActive))
+            return new { ok = false, reason = "department_not_found", deptCode, dealerCode };
+        if (staffId.Length > 0 && await db.SysUserProfiles.AnyAsync(x => x.OrgId == Org && x.DealerCode == dealerCode && x.UserStaffId == staffId))
+            return new { ok = false, reason = "staffid_exist", userStaffId = staffId, dealerCode };
+        if (viewAbilityType.Length == 0) return new { ok = false, reason = "invalid_viewabilitytype" };
+        if (userName.Length == 0) return new { ok = false, reason = "invalid_username" };
+        if (password.Length == 0) return new { ok = false, reason = "invalid_userpassword" };
+
+        var u = new SysUserProfile
+        {
+            OrgId = Org,
+            UserCode = userCode,
+            DealerCode = dealerCode,
+            DeptCode = deptCode,
+            UserStaffId = staffId,
+            UserName = userName,
+            UserPassword = password,
+            UserEmail = (d.UserEmail ?? "").Trim(),
+            UserPhoneNo = (d.UserPhoneNo ?? "").Trim(),
+            ViewAbilityType = viewAbilityType,
+            FlagSysAdmin = d.FlagSysAdmin ?? false,
+            FlagActive = true
+        };
+        db.SysUserProfiles.Add(u);
+        await db.SaveChangesAsync();
+        return new { ok = true, reason = "ok", user = new { u.UserCode, u.DealerCode, u.DeptCode, u.UserStaffId, u.UserName, u.ViewAbilityType, u.FlagSysAdmin, u.FlagActive } };
     }
 }

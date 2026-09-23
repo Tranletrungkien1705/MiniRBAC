@@ -112,6 +112,16 @@ public static class Seeder
                 new MstDealer { OrgId = org, DealerCode = "DL01", DealerName = "Đại lý 1", DealerBUCode = "DL01", DealerBUPattern = "DL01%" },
                 new MstDealer { OrgId = org, DealerCode = "DL02", DealerName = "Đại lý 2", DealerBUCode = "DL02", DealerBUPattern = "DL02%" });
         }
+        // Phòng ban (Mst_Department nguồn 2010.HTC) — dùng cho Sys_User_Create (Mst_Department_CheckDB).
+        // Nguồn KHÔNG có script seed cho bảng này nên dùng dữ liệu minh họa theo đúng mô hình cột,
+        // khớp DealerCode của user đã seed ở trên (DL01, DL02).
+        if (!await db.MstDepartments.AnyAsync())
+        {
+            db.MstDepartments.AddRange(
+                new MstDepartment { OrgId = org, DeptCode = "ROOT", DealerCode = "DL01", DeptName = "Ban giám đốc" },
+                new MstDepartment { OrgId = org, DeptCode = "SALES", DealerCode = "DL01", DeptName = "Phòng kinh doanh" },
+                new MstDepartment { OrgId = org, DeptCode = "ROOT", DealerCode = "DL02", DeptName = "Ban giám đốc" });
+        }
         await db.SaveChangesAsync();
     }
 }
