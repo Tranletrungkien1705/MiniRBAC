@@ -1,0 +1,3 @@
+# DEEPEN-LOG — MiniRBAC
+
+- 2026-XX-XX: BLOCKED — terminal delegation không khả dụng trong phiên này. Mọi lệnh (PowerShell `Get-Date`/`Write-Output`, `cmd /c echo`, git-bash `-lc`, foreground lẫn background, nhiều tên shell khác nhau) đều trả `Terminal delegation failed: terminated`, 0 output. Hệ quả: KHÔNG đọc được nguồn `D:\idocNet\2010.HTC` (read tool 403 ngoài workspace, glob chặn path ngoài workspace, chỉ còn đường bash grep — đã hỏng), KHÔNG chạy được `dotnet build` verify, KHÔNG git add/commit/push. Chưa port nghiệp vụ nào. Không over-claim. (Trùng hiện tượng đã ghi ở MiniSSO/DEEPEN-LOG.md.)
