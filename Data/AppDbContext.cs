@@ -9,6 +9,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> opt) : DbContext
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
     public DbSet<SysObject> SysObjects => Set<SysObject>();
+    public DbSet<SysObjectFunction> SysObjectFunctions => Set<SysObjectFunction>();
     public DbSet<SysUserFlag> SysUserFlags => Set<SysUserFlag>();
     public DbSet<SysUserTeam> SysUserTeams => Set<SysUserTeam>();
     public DbSet<SysUserScope> SysUserScopes => Set<SysUserScope>();
@@ -28,6 +29,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> opt) : DbContext
         b.Entity<RolePermission>().HasIndex(x => new { x.OrgId, x.RoleCode, x.PermissionCode }).IsUnique();
         b.Entity<UserRole>().HasIndex(x => new { x.OrgId, x.UserKey, x.RoleCode }).IsUnique();
         b.Entity<SysObject>().HasIndex(x => new { x.OrgId, x.ObjectCode }).IsUnique();
+        b.Entity<SysObjectFunction>().HasIndex(x => new { x.OrgId, x.ObjectCode }).IsUnique();
         b.Entity<SysUserFlag>().HasIndex(x => new { x.OrgId, x.UserKey }).IsUnique();
         b.Entity<SysUserTeam>().HasIndex(x => new { x.OrgId, x.TeamCode, x.DealerCode }).IsUnique();
         b.Entity<SysUserScope>().HasIndex(x => new { x.OrgId, x.UserKey }).IsUnique();

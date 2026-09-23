@@ -61,6 +61,20 @@ public sealed class SysObject
 }
 
 /// <summary>
+/// Cấu hình chức năng (FUNC) gắn với một đối tượng (SysObjectSetting nguồn 2010.HTC).
+/// Khóa nghiệp vụ = ObjectCode. FunctionCodes = danh sách mã chức năng (FUNC) mà đối tượng
+/// này bao hàm; dùng cho ResolveObjects khi Sys_Access_Save: gán 1 object (vd AUTH_SYSGROUP)
+/// sẽ tự mở rộng thành các FUNC con (Sys_Group_Create, Sys_Group_Delete, ...).
+/// </summary>
+public sealed class SysObjectFunction
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string ObjectCode { get; set; } = "";
+    public string FunctionCodes { get; set; } = ""; // danh sách mã FUNC, phân tách bằng dấu phẩy
+}
+
+/// <summary>
 /// Cờ quản trị hệ thống của user (Sys_User.FlagSysAdmin nguồn 2010.HTC).
 /// User có FlagSysAdmin='1' được phép mọi object đang hoạt động (bypass trong Sys_Access_CheckDeny).
 /// </summary>

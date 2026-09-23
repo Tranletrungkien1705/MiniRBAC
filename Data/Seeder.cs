@@ -36,6 +36,19 @@ public static class Seeder
                 new SysObject { OrgId = org, ObjectCode = "MNU_ADMIN_USER", ObjectName = "Menu Quản trị - QL người dùng", ObjectType = "MENU", ObjectCodeParent = "MNU_ADMIN" },
                 new SysObject { OrgId = org, ObjectCode = "MNU_ADMIN_GROUP_FUNCTION", ObjectName = "Menu Quản trị - Gán nhóm, chức năng", ObjectType = "MENU", ObjectCodeParent = "MNU_ADMIN" });
         }
+        // Cấu hình chức năng gắn với đối tượng (SysObjectSetting nguồn 2010.HTC) — dùng cho ResolveObjects.
+        // Dữ liệu THẬT lấy từ HCare.idocNet.App/Resources/SysObjectSetting.config (mã object + FUNC thật).
+        if (!await db.SysObjectFunctions.AnyAsync())
+        {
+            db.SysObjectFunctions.AddRange(
+                new SysObjectFunction { OrgId = org, ObjectCode = "AUTH_SYSGROUP", FunctionCodes = "Sys_Group_Create,Sys_Group_Delete,Sys_Group_Get,Sys_Group_Update,Sys_UserInGroup_Save" },
+                new SysObjectFunction { OrgId = org, ObjectCode = "AUTH_SYSOBJECT", FunctionCodes = "Sys_Access_Get,Sys_Access_Save" },
+                new SysObjectFunction { OrgId = org, ObjectCode = "AUTH_SYSUSER", FunctionCodes = "Sys_User_ChangePassword,Sys_User_Create,Sys_User_Delete,Sys_User_Get,Sys_User_GetForCurrentUser,Sys_User_Login,Sys_User_Update" },
+                new SysObjectFunction { OrgId = org, ObjectCode = "AUTH_SYSUSERINGROUP", FunctionCodes = "Sys_UserInGroup_Save" },
+                new SysObjectFunction { OrgId = org, ObjectCode = "ADM_ACCOUNT", FunctionCodes = "Mst_Account_CreateMulti,Mst_Account_Delete,Mst_Account_Get,Mst_Account_Update" },
+                new SysObjectFunction { OrgId = org, ObjectCode = "ADM_ACCTYPE", FunctionCodes = "Mst_AccType_Create,Mst_AccType_Delete,Mst_AccType_Get,Mst_AccType_Update" },
+                new SysObjectFunction { OrgId = org, ObjectCode = "ADM_MODEL", FunctionCodes = "Mst_CarModel_Create,Mst_CarModel_CreateMulti,Mst_CarModel_Delete,Mst_CarModel_Get,Mst_CarModel_Update" });
+        }
         // Đội bán hàng (Sys_UserTeam nguồn 2010.HTC) + phạm vi dữ liệu user (Sys_User).
         // Nguồn KHÔNG có script seed cho 2 bảng này nên dùng dữ liệu minh họa theo đúng mô hình cột.
         if (!await db.SysUserTeams.AnyAsync())

@@ -130,6 +130,18 @@ app.MapPost("/api/users/{userKey}/sysadmin", async (string userKey, bool flag, I
 app.MapGet("/api/checkdeny", async (string user, string objectCode, IRbacService svc) =>
     Results.Ok(await svc.CheckDenyAsync(user, objectCode))).RequireAuthorization();
 
+// ===== SysObjectSetting + ResolveObjects (nguồn 2010.HTC) =====
+// Cấu hình FUNC gắn với object (SysObjectSetting.config): gán 1 object (vd AUTH_SYSGROUP) sẽ bao hàm
+// các mã chức năng con (Sys_Group_Create, Sys_Group_Delete, ...). Dùng khi Sys_Access_Save.
+app.MapPut("/api/objects/{objectCode}/functions", async (string objectCode, ObjectFunctionsDto d, IRbacService svc) =>
+    Results.Ok(await svc.SetObjectFunctionsAsync(objectCode, d.FunctionCodes))).RequireAuthorization();
+app.MapGet("/api/objects/functions", async (string? objectCode, IRbacService svc) =>
+    Results.Ok(await svc.ListObjectFunctionsAsync(objectCode))).RequireAuthorization();
+
+// ResolveObjects: mở rộng danh sách object thành tập mã FUNC (giữ object gốc + các FUNC cấu hình).
+app.MapPost("/api/objects/resolve", async (ResolveObjectsDto d, IRbacService svc) =>
+    Results.Ok(await svc.ResolveObjectsAsync(d.ObjectCodes))).RequireAuthorization();
+
 // Import hàng loạt Role thật từ Sys_Group + gán UserRole thật cho user có FlagSysAdmin/FlagSysViewer
 // (SQL nguồn 2010.HTC). Sys_Function ở nguồn RỖNG (0 dòng) nên KHÔNG import Permission/RolePermission —
 // không suy diễn dữ liệu không có thật.
@@ -281,6 +293,8 @@ app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 app.Run();
 
 record RegisterOrgDto(string Name);
+record ObjectFunctionsDto(List<string> FunctionCodes);
+record ResolveObjectsDto(List<string> ObjectCodes);
 record ImportUserRoleDto(string? UserCode, string? FlagSysAdmin, string? FlagSysViewer);
 record GroupAccessDto(List<string> ObjectCodes);
 record LoginDto(string UserCode, string? Password);

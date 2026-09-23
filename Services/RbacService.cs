@@ -34,6 +34,10 @@ public interface IRbacService
     Task<object> ObjectTreeAsync();
     Task<object> SetSysAdminAsync(string userKey, bool flag);
     Task<object> CheckDenyAsync(string userKey, string objectCode);
+    // SysObjectSetting + ResolveObjects (nguồn 2010.HTC): cấu hình FUNC gắn với object
+    Task<object> SetObjectFunctionsAsync(string objectCode, List<string> functionCodes);
+    Task<object> ListObjectFunctionsAsync(string? objectCode);
+    Task<object> ResolveObjectsAsync(List<string> objectCodes);
     // Sys_UserTeam + phạm vi dữ liệu (nguồn 2010.HTC)
     Task<object> AddTeamAsync(UserTeamDto d);
     Task<object> ListTeamsAsync(string? dealerCode, bool? activeOnly);
@@ -233,6 +237,54 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         var roles = await db.UserRoles.Where(x => x.OrgId == Org && x.UserKey == userKey).Select(x => x.RoleCode).ToListAsync();
         var granted = roles.Count > 0 && await db.RolePermissions.AnyAsync(x => x.OrgId == Org && roles.Contains(x.RoleCode) && x.PermissionCode == objectCode);
         return new { userKey, objectCode, allowed = granted, reason = granted ? "granted" : "denied" };
+    }
+
+    // ===== SysObjectSetting + ResolveObjects (nguồn 2010.HTC) =====
+    // UpdateSysObjectFunctions: ghi cấu hình FUNC gắn với 1 object (thay toàn bộ danh sách FUNC của object).
+    public async Task<object> SetObjectFunctionsAsync(string objectCode, List<string> functionCodes)
+    {
+        objectCode = (objectCode ?? "").Trim().ToUpperInvariant();
+        var codes = (functionCodes ?? new List<string>())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim()).Distinct().ToList();
+        var f = await db.SysObjectFunctions.FirstOrDefaultAsync(x => x.OrgId == Org && x.ObjectCode == objectCode);
+        if (f is null) { f = new SysObjectFunction { OrgId = Org, ObjectCode = objectCode }; db.SysObjectFunctions.Add(f); }
+        f.FunctionCodes = string.Join(",", codes);
+        await db.SaveChangesAsync();
+        return new { f.ObjectCode, functionCodes = codes };
+    }
+
+    // GetSysObjectSetting: đọc cấu hình FUNC (theo 1 object hoặc toàn bộ).
+    public async Task<object> ListObjectFunctionsAsync(string? objectCode)
+    {
+        var q = db.SysObjectFunctions.Where(x => x.OrgId == Org);
+        if (!string.IsNullOrWhiteSpace(objectCode)) { var oc = objectCode.Trim().ToUpperInvariant(); q = q.Where(x => x.ObjectCode == oc); }
+        var items = await q.OrderBy(x => x.ObjectCode)
+            .Select(x => new { x.ObjectCode, x.FunctionCodes }).ToListAsync();
+        return new { count = items.Count, items };
+    }
+
+    // ResolveObjects (nguồn 2010.HTC): mở rộng danh sách object thành tập mã FUNC.
+    // Với mỗi object: giữ chính nó, rồi thêm các FUNC trong cấu hình SysObjectSetting của nó
+    // (mỗi phần tử FunctionCodes có thể chứa nhiều mã phân tách bằng dấu phẩy). Khử trùng lặp.
+    public async Task<object> ResolveObjectsAsync(List<string> objectCodes)
+    {
+        var input = (objectCodes ?? new List<string>())
+            .Where(o => !string.IsNullOrWhiteSpace(o))
+            .Select(o => o.Trim().ToUpperInvariant()).Distinct().ToList();
+        var setting = await db.SysObjectFunctions.Where(x => x.OrgId == Org).ToListAsync();
+        var byObject = setting.ToDictionary(x => x.ObjectCode, x => x.FunctionCodes, StringComparer.OrdinalIgnoreCase);
+
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var code in input)
+        {
+            if (seen.Add(code)) result.Add(code);
+            if (!byObject.TryGetValue(code, out var funcs)) continue;
+            foreach (var part in funcs.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (seen.Add(part)) result.Add(part);
+        }
+        return new { input, resolved = result, count = result.Count };
     }
 
     // ===== Sys_UserTeam (nguồn 2010.HTC) =====
