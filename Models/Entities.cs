@@ -176,6 +176,7 @@ public sealed class SysUserProfile
     public string UserEmail { get; set; } = "";
     public string UserPhoneNo { get; set; } = "";
     public string? ViewAbilityType { get; set; }
+    public string AreaCode { get; set; } = "";   // vùng thị trường của user (Sys_User.AreaCode) — dùng cho Mst_AreaMarket view-ability
     public bool FlagSysAdmin { get; set; }
     public bool FlagActive { get; set; } = true;
 }
@@ -207,6 +208,26 @@ public sealed class MstDealer
     public string DealerName { get; set; } = "";
     public string? DealerBUCode { get; set; }
     public string? DealerBUPattern { get; set; }
+    public bool FlagActive { get; set; } = true;
+}
+
+/// <summary>
+/// Vùng thị trường (Mst_AreaMarket nguồn 2010.HTC) — dùng cho engine phạm vi nhìn dữ liệu theo vùng.
+/// Khóa nghiệp vụ = AreaCode. AreaCodeParent: mã vùng cấp trên (dựng cây).
+/// AreaBUCode/AreaBUPattern: mã/mẫu BU của vùng (Mst_AreaMarket_UpdBU: AreaBUCode = cha.AreaBUCode + '.' + AreaCode,
+/// AreaBUPattern = AreaBUCode + '%') — dùng để mở rộng phạm vi xem theo BU khi user ở đại lý gốc.
+/// AreaStatus: trạng thái vùng (Mst_AreaMarket_CheckDB).
+/// </summary>
+public sealed class MstAreaMarket
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string AreaCode { get; set; } = "";
+    public string AreaName { get; set; } = "";
+    public string? AreaCodeParent { get; set; }
+    public string? AreaBUCode { get; set; }
+    public string? AreaBUPattern { get; set; }
+    public string? AreaStatus { get; set; }
     public bool FlagActive { get; set; } = true;
 }
 

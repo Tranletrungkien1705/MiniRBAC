@@ -96,9 +96,9 @@ public static class Seeder
         if (!await db.SysUserProfiles.AnyAsync())
         {
             db.SysUserProfiles.AddRange(
-                new SysUserProfile { OrgId = org, UserCode = "admin@demo", DealerCode = "DL01", DeptCode = "ROOT", UserName = "Quản trị demo", UserPassword = "admin123", ViewAbilityType = "ALL", FlagSysAdmin = true },
-                new SysUserProfile { OrgId = org, UserCode = "leader01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Trưởng đội 1", UserPassword = "leader123", ViewAbilityType = "TEAM" },
-                new SysUserProfile { OrgId = org, UserCode = "sale01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Nhân viên bán hàng 1", UserPassword = "sale123", ViewAbilityType = "SELF" });
+                new SysUserProfile { OrgId = org, UserCode = "admin@demo", DealerCode = "DL01", DeptCode = "ROOT", UserName = "Quản trị demo", UserPassword = "admin123", ViewAbilityType = "ALL", AreaCode = "VN", FlagSysAdmin = true },
+                new SysUserProfile { OrgId = org, UserCode = "leader01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Trưởng đội 1", UserPassword = "leader123", ViewAbilityType = "TEAM", AreaCode = "MB" },
+                new SysUserProfile { OrgId = org, UserCode = "sale01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Nhân viên bán hàng 1", UserPassword = "sale123", ViewAbilityType = "SELF", AreaCode = "MB" });
         }
         if (!await db.SysUserInTeams.AnyAsync())
         {
@@ -134,6 +134,17 @@ public static class Seeder
                 new MstDepartment { OrgId = org, DeptCode = "ROOT", DealerCode = "DL01", DeptName = "Ban giám đốc" },
                 new MstDepartment { OrgId = org, DeptCode = "SALES", DealerCode = "DL01", DeptName = "Phòng kinh doanh" },
                 new MstDepartment { OrgId = org, DeptCode = "ROOT", DealerCode = "DL02", DeptName = "Ban giám đốc" });
+        }
+        // Vùng thị trường (Mst_AreaMarket nguồn 2010.HTC) — dùng cho engine phạm vi nhìn dữ liệu theo vùng.
+        // Nguồn KHÔNG có script seed cho bảng này nên dùng dữ liệu minh họa theo đúng mô hình cột
+        // (AreaCode/AreaCodeParent/AreaBUCode/AreaBUPattern/AreaStatus). AreaBUCode/AreaBUPattern theo
+        // đúng quy tắc Mst_AreaMarket_UpdBU: AreaBUCode = cha.AreaBUCode + '.' + AreaCode, AreaBUPattern = AreaBUCode + '%'.
+        if (!await db.MstAreaMarkets.AnyAsync())
+        {
+            db.MstAreaMarkets.AddRange(
+                new MstAreaMarket { OrgId = org, AreaCode = "VN", AreaName = "Toàn quốc", AreaBUCode = "VN", AreaBUPattern = "VN%", AreaStatus = "1" },
+                new MstAreaMarket { OrgId = org, AreaCode = "MB", AreaName = "Miền Bắc", AreaCodeParent = "VN", AreaBUCode = "VN.MB", AreaBUPattern = "VN.MB%", AreaStatus = "1" },
+                new MstAreaMarket { OrgId = org, AreaCode = "MN", AreaName = "Miền Nam", AreaCodeParent = "VN", AreaBUCode = "VN.MN", AreaBUPattern = "VN.MN%", AreaStatus = "1" });
         }
         await db.SaveChangesAsync();
     }
