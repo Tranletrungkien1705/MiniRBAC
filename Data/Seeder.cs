@@ -77,6 +77,22 @@ public static class Seeder
                 new SysAccess { OrgId = org, GroupCode = "GRP_ADMIN", ObjectCode = "MNU_ADMIN_USER" },
                 new SysAccess { OrgId = org, GroupCode = "GRP_ADMIN", ObjectCode = "MNU_ADMIN_GROUP_FUNCTION" });
         }
+        // Hồ sơ user (Sys_User) + thành viên đội (Sys_UserInTeam nguồn 2010.HTC) — dùng cho Sys_User_GetForCurrentUser.
+        // Nguồn KHÔNG có script seed cho 2 bảng này nên dùng dữ liệu minh họa theo đúng mô hình cột,
+        // khớp user/đội đã seed ở trên (admin@demo, leader01@demo, sale01@demo; TEAM01/DL01).
+        if (!await db.SysUserProfiles.AnyAsync())
+        {
+            db.SysUserProfiles.AddRange(
+                new SysUserProfile { OrgId = org, UserCode = "admin@demo", DealerCode = "DL01", DeptCode = "ROOT", UserName = "Quản trị demo", ViewAbilityType = "ALL", FlagSysAdmin = true },
+                new SysUserProfile { OrgId = org, UserCode = "leader01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Trưởng đội 1", ViewAbilityType = "TEAM" },
+                new SysUserProfile { OrgId = org, UserCode = "sale01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Nhân viên bán hàng 1", ViewAbilityType = "SELF" });
+        }
+        if (!await db.SysUserInTeams.AnyAsync())
+        {
+            db.SysUserInTeams.AddRange(
+                new SysUserInTeam { OrgId = org, UserCode = "leader01@demo", TeamCode = "TEAM01", DealerCode = "DL01" },
+                new SysUserInTeam { OrgId = org, UserCode = "sale01@demo", TeamCode = "TEAM01", DealerCode = "DL01" });
+        }
         await db.SaveChangesAsync();
     }
 }

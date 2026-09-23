@@ -45,6 +45,8 @@ public interface IRbacService
     // Sys_Access (nguồn 2010.HTC): grant object cho nhóm, thay toàn bộ trong 1 lần
     Task<object?> SetGroupAccessAsync(string groupCode, List<string> objectCodes);
     Task<object?> ListGroupAccessAsync(string groupCode);
+    // Sys_User_GetForCurrentUser (nguồn 2010.HTC): hồ sơ user hiện tại + danh sách object hiệu lực
+    Task<object> GetForCurrentUserAsync(string userKey);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -399,5 +401,57 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
                 (a, o) => new { o.ObjectCode, o.ObjectName, o.ObjectType, o.FlagActive })
             .OrderBy(x => x.ObjectCode).ToListAsync();
         return new { g.GroupCode, g.GroupName, g.FlagActive, count = items.Count, objects = items };
+    }
+
+    // ===== Sys_User_GetForCurrentUser (nguồn 2010.HTC) =====
+    // Trả về hồ sơ user hiện tại (Sys_User + đội qua Sys_UserInTeam→Sys_UserTeam) và
+    // danh sách object HIỆU LỰC = hợp của:
+    //   (a) object đang hoạt động được grant qua các NHÓM đang hoạt động mà user thuộc về
+    //       (Sys_UserInGroup → Sys_Group active → Sys_Access → Sys_Object active), và
+    //   (b) nếu user có FlagSysAdmin='1' thì TẤT CẢ object đang hoạt động.
+    // Giống đúng nhánh union trong Sys_User_GetForCurrentUser của nguồn.
+    public async Task<object> GetForCurrentUserAsync(string userKey)
+    {
+        userKey = userKey.Trim();
+        var profile = await db.SysUserProfiles.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserCode == userKey);
+        if (profile is null)
+            return new { userKey, found = false, profile = (object?)null, team = (object?)null, objects = Array.Empty<object>() };
+
+        // Đội của user (Sys_UserInTeam → Sys_UserTeam đang hoạt động).
+        var team = await (from uit in db.SysUserInTeams.Where(x => x.OrgId == Org && x.UserCode == userKey)
+                          join t in db.SysUserTeams.Where(x => x.OrgId == Org && x.FlagActive)
+                              on new { uit.TeamCode, uit.DealerCode } equals new { t.TeamCode, t.DealerCode }
+                          select new { t.TeamCode, t.DealerCode, t.TeamName }).FirstOrDefaultAsync();
+
+        // (a) object hiệu lực qua nhóm đang hoạt động.
+        var groupCodes = await db.SysUserInGroups.Where(x => x.OrgId == Org && x.UserCode == userKey)
+            .Select(x => x.GroupCode).ToListAsync();
+        var activeGroups = await db.SysGroups.Where(x => x.OrgId == Org && x.FlagActive && groupCodes.Contains(x.GroupCode))
+            .Select(x => x.GroupCode).ToListAsync();
+        var granted = await db.SysAccesses.Where(x => x.OrgId == Org && activeGroups.Contains(x.GroupCode))
+            .Select(x => x.ObjectCode).Distinct().ToListAsync();
+
+        // (b) SysAdmin: tất cả object đang hoạt động.
+        var isAdmin = profile.FlagSysAdmin;
+        var effectiveCodes = isAdmin
+            ? await db.SysObjects.Where(x => x.OrgId == Org && x.FlagActive).Select(x => x.ObjectCode).ToListAsync()
+            : await db.SysObjects.Where(x => x.OrgId == Org && x.FlagActive && granted.Contains(x.ObjectCode))
+                .Select(x => x.ObjectCode).ToListAsync();
+
+        var objects = await db.SysObjects.Where(x => x.OrgId == Org && effectiveCodes.Contains(x.ObjectCode))
+            .OrderBy(x => x.ObjectCode)
+            .Select(x => new { x.ObjectCode, x.ObjectName, x.ObjectType, x.ObjectCodeParent, x.FlagActive })
+            .ToListAsync();
+
+        return new
+        {
+            userKey,
+            found = true,
+            profile = new { profile.UserCode, profile.DealerCode, profile.DeptCode, profile.UserName, profile.ViewAbilityType, profile.FlagSysAdmin, profile.FlagActive },
+            team,
+            isSysAdmin = isAdmin,
+            count = objects.Count,
+            objects
+        };
     }
 }

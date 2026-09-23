@@ -212,6 +212,13 @@ app.MapGet("/api/groups/{groupCode}/access", async (string groupCode, IRbacServi
     return r is null ? Results.NotFound(new { error = "Nhóm không tồn tại." }) : Results.Ok(r);
 }).RequireAuthorization();
 
+// ===== Sys_User_GetForCurrentUser (nguồn 2010.HTC) =====
+// Hồ sơ user hiện tại (Sys_User + đội qua Sys_UserInTeam→Sys_UserTeam) và danh sách object HIỆU LỰC:
+// hợp của object đang hoạt động được grant qua các nhóm đang hoạt động mà user thuộc về,
+// và (nếu FlagSysAdmin='1') tất cả object đang hoạt động. Dùng để dựng menu/chức năng cho user.
+app.MapGet("/api/users/{userKey}/current", async (string userKey, IRbacService svc) =>
+    Results.Ok(await svc.GetForCurrentUserAsync(userKey))).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });

@@ -143,3 +143,33 @@ public sealed class SysAccess
     public string GroupCode { get; set; } = "";
     public string ObjectCode { get; set; } = "";
 }
+
+/// <summary>
+/// Hồ sơ người dùng (Sys_User nguồn 2010.HTC) — dùng cho Sys_User_GetForCurrentUser.
+/// Khóa nghiệp vụ = UserCode. ViewAbilityType: tầm nhìn dữ liệu; FlagSysAdmin: bypass deny-check.
+/// </summary>
+public sealed class SysUserProfile
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string UserCode { get; set; } = "";
+    public string DealerCode { get; set; } = "";
+    public string DeptCode { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public string? ViewAbilityType { get; set; }
+    public bool FlagSysAdmin { get; set; }
+    public bool FlagActive { get; set; } = true;
+}
+
+/// <summary>
+/// Thành viên đội (Sys_UserInTeam nguồn 2010.HTC). Khóa nghiệp vụ = (UserCode, TeamCode, DealerCode).
+/// Là cầu nối user → đội trong Sys_User_GetForCurrentUser (lấy TeamCode/TeamName của user hiện tại).
+/// </summary>
+public sealed class SysUserInTeam
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string UserCode { get; set; } = "";
+    public string TeamCode { get; set; } = "";
+    public string DealerCode { get; set; } = "";
+}
