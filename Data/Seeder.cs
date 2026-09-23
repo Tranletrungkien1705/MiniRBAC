@@ -83,9 +83,9 @@ public static class Seeder
         if (!await db.SysUserProfiles.AnyAsync())
         {
             db.SysUserProfiles.AddRange(
-                new SysUserProfile { OrgId = org, UserCode = "admin@demo", DealerCode = "DL01", DeptCode = "ROOT", UserName = "Quản trị demo", ViewAbilityType = "ALL", FlagSysAdmin = true },
-                new SysUserProfile { OrgId = org, UserCode = "leader01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Trưởng đội 1", ViewAbilityType = "TEAM" },
-                new SysUserProfile { OrgId = org, UserCode = "sale01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Nhân viên bán hàng 1", ViewAbilityType = "SELF" });
+                new SysUserProfile { OrgId = org, UserCode = "admin@demo", DealerCode = "DL01", DeptCode = "ROOT", UserName = "Quản trị demo", UserPassword = "admin123", ViewAbilityType = "ALL", FlagSysAdmin = true },
+                new SysUserProfile { OrgId = org, UserCode = "leader01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Trưởng đội 1", UserPassword = "leader123", ViewAbilityType = "TEAM" },
+                new SysUserProfile { OrgId = org, UserCode = "sale01@demo", DealerCode = "DL01", DeptCode = "SALES", UserName = "Nhân viên bán hàng 1", UserPassword = "sale123", ViewAbilityType = "SELF" });
         }
         if (!await db.SysUserInTeams.AnyAsync())
         {
@@ -102,6 +102,15 @@ public static class Seeder
                 new SysUserViewAbility { OrgId = org, UserCode = "admin@demo", DealerCode = "HTC", DealerBUPattern = "%", ViewAbilityType = "ADMIN", FlagSysAdmin = true },
                 new SysUserViewAbility { OrgId = org, UserCode = "leader01@demo", DealerCode = "DL01", DealerBUPattern = "DL01%", ViewAbilityType = "TEAM" },
                 new SysUserViewAbility { OrgId = org, UserCode = "sale01@demo", DealerCode = "DL01", DealerBUPattern = "DL01%", ViewAbilityType = "USER" });
+        }
+        // Đại lý (Mst_Dealer nguồn 2010.HTC) — dùng cho Sys_User_Login (Mst_Dealer_CheckDB).
+        // Nguồn KHÔNG có script seed cho bảng này nên dùng dữ liệu minh họa theo đúng mô hình cột,
+        // khớp DealerCode của user đã seed ở trên (DL01, DL02).
+        if (!await db.MstDealers.AnyAsync())
+        {
+            db.MstDealers.AddRange(
+                new MstDealer { OrgId = org, DealerCode = "DL01", DealerName = "Đại lý 1", DealerBUCode = "DL01", DealerBUPattern = "DL01%" },
+                new MstDealer { OrgId = org, DealerCode = "DL02", DealerName = "Đại lý 2", DealerBUCode = "DL02", DealerBUPattern = "DL02%" });
         }
         await db.SaveChangesAsync();
     }

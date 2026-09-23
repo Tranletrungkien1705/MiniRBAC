@@ -243,6 +243,16 @@ app.MapGet("/api/users/{userKey}/viewability2", async (string userKey, IRbacServ
 app.MapGet("/api/users/{userKey}/canaccess/{targetUserCode}", async (string userKey, string targetUserCode, IRbacService svc) =>
     Results.Ok(await svc.CheckAccessUserAsync(userKey, targetUserCode))).RequireAuthorization();
 
+// ===== Sys_User_Login + Sys_User_ChangePassword (nguồn 2010.HTC) =====
+// Đăng nhập: user tồn tại + đang hoạt động, đại lý của user tồn tại + đang hoạt động, mật khẩu khớp.
+app.MapPost("/api/login", async (LoginDto d, IRbacService svc) =>
+    string.IsNullOrWhiteSpace(d.UserCode) ? Results.BadRequest(new { error = "Cần UserCode." })
+        : Results.Ok(await svc.LoginAsync(d.UserCode, d.Password ?? "")));
+
+// Đổi mật khẩu: user tồn tại + đang hoạt động, mật khẩu cũ khớp, ghi mật khẩu mới.
+app.MapPost("/api/users/{userKey}/changepassword", async (string userKey, ChangePasswordDto d, IRbacService svc) =>
+    Results.Ok(await svc.ChangePasswordAsync(userKey, d.OldPassword ?? "", d.NewPassword ?? ""))).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });
@@ -256,3 +266,5 @@ app.Run();
 record RegisterOrgDto(string Name);
 record ImportUserRoleDto(string? UserCode, string? FlagSysAdmin, string? FlagSysViewer);
 record GroupAccessDto(List<string> ObjectCodes);
+record LoginDto(string UserCode, string? Password);
+record ChangePasswordDto(string? OldPassword, string? NewPassword);

@@ -54,6 +54,9 @@ public interface IRbacService
     // Sys_User_GetByViewAbility + myCache_ViewAbility_CheckAccessUser (nguồn 2010.HTC)
     Task<object> GetByViewAbilityAsync(string userKey);
     Task<object> CheckAccessUserAsync(string userKey, string targetUserCode);
+    // Sys_User_Login + Sys_User_ChangePassword (nguồn 2010.HTC)
+    Task<object> LoginAsync(string userCode, string password);
+    Task<object> ChangePasswordAsync(string userCode, string oldPassword, string newPassword);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -641,5 +644,51 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         var (_, _, _, _, _, write) = await ComputeViewAbilityAsync(userKey);
         var allowed = write.Contains(targetUserCode);
         return new { userKey, targetUserCode, allowed, reason = allowed ? "in_write_scope" : "denied" };
+    }
+
+    // ===== Sys_User_Login (nguồn 2010.HTC) =====
+    // Đăng nhập: (1) Sys_User_CheckDB — user phải TỒN TẠI và ĐANG HOẠT ĐỘNG (FlagActive);
+    // (2) Mst_Dealer_CheckDB — đại lý của user phải TỒN TẠI và ĐANG HOẠT ĐỘNG;
+    // (3) so khớp mật khẩu (Sys_User.UserPassword). Sai bước nào trả reason tương ứng.
+    public async Task<object> LoginAsync(string userCode, string password)
+    {
+        userCode = userCode.Trim();
+        var user = await db.SysUserProfiles.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserCode == userCode);
+        if (user is null) return new { userCode, ok = false, reason = "user_not_found" };
+        if (!user.FlagActive) return new { userCode, ok = false, reason = "user_inactive" };
+
+        var dealer = await db.MstDealers.FirstOrDefaultAsync(x => x.OrgId == Org && x.DealerCode == user.DealerCode);
+        if (dealer is null) return new { userCode, ok = false, reason = "dealer_not_found" };
+        if (!dealer.FlagActive) return new { userCode, ok = false, reason = "dealer_inactive" };
+
+        if (!string.Equals(password ?? "", user.UserPassword, StringComparison.Ordinal))
+            return new { userCode, ok = false, reason = "invalid_password" };
+
+        return new
+        {
+            userCode,
+            ok = true,
+            reason = "ok",
+            user = new { user.UserCode, user.DealerCode, user.DeptCode, user.UserName, user.ViewAbilityType, user.FlagSysAdmin },
+            dealer = new { dealer.DealerCode, dealer.DealerName }
+        };
+    }
+
+    // ===== Sys_User_ChangePassword (nguồn 2010.HTC) =====
+    // Đổi mật khẩu: user phải TỒN TẠI và ĐANG HOẠT ĐỘNG; mật khẩu cũ phải khớp; sau đó ghi mật khẩu mới.
+    public async Task<object> ChangePasswordAsync(string userCode, string oldPassword, string newPassword)
+    {
+        userCode = userCode.Trim();
+        var user = await db.SysUserProfiles.FirstOrDefaultAsync(x => x.OrgId == Org && x.UserCode == userCode);
+        if (user is null) return new { userCode, ok = false, reason = "user_not_found" };
+        if (!user.FlagActive) return new { userCode, ok = false, reason = "user_inactive" };
+        if (!string.Equals(oldPassword ?? "", user.UserPassword, StringComparison.Ordinal))
+            return new { userCode, ok = false, reason = "invalid_password_old" };
+        if (string.IsNullOrWhiteSpace(newPassword))
+            return new { userCode, ok = false, reason = "new_password_empty" };
+
+        user.UserPassword = newPassword;
+        await db.SaveChangesAsync();
+        return new { userCode, ok = true, reason = "ok" };
     }
 }

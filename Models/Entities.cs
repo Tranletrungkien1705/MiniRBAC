@@ -147,6 +147,7 @@ public sealed class SysAccess
 /// <summary>
 /// Hồ sơ người dùng (Sys_User nguồn 2010.HTC) — dùng cho Sys_User_GetForCurrentUser.
 /// Khóa nghiệp vụ = UserCode. ViewAbilityType: tầm nhìn dữ liệu; FlagSysAdmin: bypass deny-check.
+/// UserPassword: mật khẩu đăng nhập (Sys_User.UserPassword) — dùng cho Sys_User_Login / Sys_User_ChangePassword.
 /// </summary>
 public sealed class SysUserProfile
 {
@@ -156,8 +157,25 @@ public sealed class SysUserProfile
     public string DealerCode { get; set; } = "";
     public string DeptCode { get; set; } = "";
     public string UserName { get; set; } = "";
+    public string UserPassword { get; set; } = "";
     public string? ViewAbilityType { get; set; }
     public bool FlagSysAdmin { get; set; }
+    public bool FlagActive { get; set; } = true;
+}
+
+/// <summary>
+/// Đại lý (Mst_Dealer nguồn 2010.HTC) — dùng cho Sys_User_Login (Mst_Dealer_CheckDB).
+/// Khóa nghiệp vụ = DealerCode. FlagActive: chỉ đại lý đang hoạt động mới cho user đăng nhập.
+/// DealerBUCode/DealerBUPattern: mã/mẫu BU của đại lý (dùng cho phạm vi nhìn dữ liệu).
+/// </summary>
+public sealed class MstDealer
+{
+    public long Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string DealerCode { get; set; } = "";
+    public string DealerName { get; set; } = "";
+    public string? DealerBUCode { get; set; }
+    public string? DealerBUPattern { get; set; }
     public bool FlagActive { get; set; } = true;
 }
 
