@@ -56,6 +56,8 @@ public interface IRbacService
     // Sys_Access (nguồn 2010.HTC): grant object cho nhóm, thay toàn bộ trong 1 lần
     Task<object?> SetGroupAccessAsync(string groupCode, List<string> objectCodes);
     Task<object?> ListGroupAccessAsync(string groupCode);
+    // GetAccess (nguồn 2010.HTC): màn gán chức năng cho nhóm — toàn bộ object kèm cờ granted
+    Task<object?> GetGroupAccessScreenAsync(string groupCode, string? type, bool? activeOnly);
     // Sys_User_GetForCurrentUser (nguồn 2010.HTC): hồ sơ user hiện tại + danh sách object hiệu lực
     Task<object> GetForCurrentUserAsync(string userKey);
     // Sys_User_GetByViewAbility + myCache_ViewAbility_CheckAccessUser (nguồn 2010.HTC)
@@ -505,6 +507,36 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
             db.SysAccesses.Add(new SysAccess { OrgId = Org, GroupCode = groupCode, ObjectCode = o });
         await db.SaveChangesAsync();
         return new { groupCode, objects = active, skipped = wanted.Except(active).ToList() };
+    }
+
+    // GetAccess (nguồn 2010.HTC, SysAccessController.GetAccess + Sys_AccessService.ListObjectGet/List_SysAccess_Get):
+    // Màn "Thêm chức năng cho nhóm" — trả về TOÀN BỘ danh mục object (Sys_Object_Get) kèm cờ granted
+    // cho biết object đó đã được grant cho nhóm hay chưa (đối chiếu Sys_Access của nhóm).
+    // Khác ListGroupAccessAsync (chỉ liệt kê object ĐÃ grant): đây là danh sách đầy đủ để tick chọn.
+    // Trả null nếu nhóm không tồn tại.
+    public async Task<object?> GetGroupAccessScreenAsync(string groupCode, string? type, bool? activeOnly)
+    {
+        groupCode = groupCode.Trim().ToUpperInvariant();
+        var g = await db.SysGroups.FirstOrDefaultAsync(x => x.OrgId == Org && x.GroupCode == groupCode);
+        if (g is null) return null;
+
+        var granted = await db.SysAccesses.Where(x => x.OrgId == Org && x.GroupCode == groupCode)
+            .Select(x => x.ObjectCode).ToListAsync();
+        var grantedSet = new HashSet<string>(granted, StringComparer.OrdinalIgnoreCase);
+
+        var q = db.SysObjects.Where(x => x.OrgId == Org);
+        if (!string.IsNullOrWhiteSpace(type)) { var t = type.Trim().ToUpperInvariant(); q = q.Where(x => x.ObjectType == t); }
+        if (activeOnly == true) q = q.Where(x => x.FlagActive);
+        var all = await q.OrderBy(x => x.ObjectCode)
+            .Select(x => new { x.ObjectCode, x.ObjectName, x.ObjectType, x.ObjectCodeParent, x.FlagActive })
+            .ToListAsync();
+
+        var items = all.Select(o => new
+        {
+            o.ObjectCode, o.ObjectName, o.ObjectType, o.ObjectCodeParent, o.FlagActive,
+            granted = grantedSet.Contains(o.ObjectCode)
+        }).ToList();
+        return new { g.GroupCode, g.GroupName, g.FlagActive, count = items.Count, grantedCount = grantedSet.Count, items };
     }
 
     // Sys_Access_Get: danh sách object mà nhóm được grant (kèm tên/loại object).
