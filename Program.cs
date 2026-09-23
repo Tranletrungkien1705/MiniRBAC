@@ -208,6 +208,23 @@ app.MapPost("/api/groups", async (GroupDto d, IRbacService svc) =>
 app.MapGet("/api/groups", async (bool? activeOnly, IRbacService svc) =>
     Results.Ok(await svc.ListGroupsAsync(activeOnly))).RequireAuthorization();
 
+// Sys_Group_Create (nguồn 2010.HTC): TẠO nhóm mới — GroupCode bắt buộc + CHƯA tồn tại, GroupName bắt buộc.
+// Khác POST /api/groups (AddGroupAsync upsert không kiểm tra trùng).
+app.MapPost("/api/groups/create", async (GroupDto d, IRbacService svc) =>
+    Results.Ok(await svc.CreateGroupAsync(d))).RequireAuthorization();
+
+// Sys_Group_Update (nguồn 2010.HTC): cập nhật nhóm (partial theo Ft_Cols_Upd) — nhóm phải tồn tại,
+// GroupName bắt buộc khi cập nhật.
+app.MapPut("/api/groups/{groupCode}", async (string groupCode, UpdateGroupDto d, IRbacService svc) =>
+    Results.Ok(await svc.UpdateGroupAsync(groupCode, d))).RequireAuthorization();
+
+// Sys_Group_Delete (nguồn 2010.HTC): xóa nhóm + dọn mọi thành viên (Sys_UserInGroup) của nhóm.
+app.MapDelete("/api/groups/{groupCode}", async (string groupCode, IRbacService svc) =>
+{
+    var r = await svc.DeleteGroupAsync(groupCode);
+    return r.Ok ? Results.Ok(r) : Results.NotFound(r);
+}).RequireAuthorization();
+
 // Thành viên nhóm (Sys_UserInGroup_Save): thay TOÀN BỘ thành viên của nhóm trong 1 thao tác.
 app.MapPut("/api/groups/{groupCode}/members", async (string groupCode, GroupMembersDto d, IRbacService svc) =>
 {

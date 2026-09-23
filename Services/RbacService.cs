@@ -12,6 +12,8 @@ public record UserTeamDto(string TeamCode, string DealerCode, string TeamName, b
 public record UserScopeDto(string UserKey, string? DealerCode, string? DBCode, string? TeamCode, bool? FlagSysAdmin, bool? FlagDBAdmin, bool? FlagTeamLeader, bool? FlagSalesman);
 public record GroupDto(string GroupCode, string GroupName, bool? FlagActive);
 public record GroupMembersDto(List<string> UserCodes);
+public record UpdateGroupDto(string? GroupName, bool? FlagActive, List<string>? Cols);
+public record DeleteGroupResult(bool Ok, string Reason, string GroupCode, int RemovedMembers);
 public record ViewAbilityDto(string UserCode, string? DealerCode, string? DealerBUPattern, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive);
 public record CreateUserDto(string UserCode, string? DealerCode, string? DeptCode, string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin);
 public record UpdateUserDto(string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive, List<string>? Cols);
@@ -50,6 +52,10 @@ public interface IRbacService
     // Sys_Group + Sys_UserInGroup (nguồn 2010.HTC)
     Task<object> AddGroupAsync(GroupDto d);
     Task<object> ListGroupsAsync(bool? activeOnly);
+    // Sys_Group_Create / Sys_Group_Update / Sys_Group_Delete (nguồn 2010.HTC)
+    Task<object> CreateGroupAsync(GroupDto d);
+    Task<object> UpdateGroupAsync(string groupCode, UpdateGroupDto d);
+    Task<DeleteGroupResult> DeleteGroupAsync(string groupCode);
     Task<object?> SetGroupMembersAsync(string groupCode, List<string> userCodes);
     Task<object?> ListGroupMembersAsync(string groupCode);
     Task<object> GroupsOfUserAsync(string userCode);
@@ -450,6 +456,77 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
             members = db.SysUserInGroups.Count(m => m.OrgId == Org && m.GroupCode == x.GroupCode)
         }).ToListAsync();
         return new { count = items.Count, items };
+    }
+
+    // ===== Sys_Group_Create (nguồn 2010.HTC) =====
+    // Tạo nhóm quyền mới kèm kiểm tra ràng buộc giống nguồn:
+    //  (1) GroupCode bắt buộc (Sys_Group_Create_InvalidGroupCode);
+    //  (2) GroupCode CHƯA tồn tại (Sys_Group_CheckDB, Flag.No → Sys_Group_CheckDB_GroupCodeExist);
+    //  (3) GroupName bắt buộc (Sys_Group_Create_InvalidGroupName). Ghi với FlagActive='1'.
+    // Khác AddGroupAsync (upsert không kiểm tra trùng) — đây là thao tác TẠO thuần theo nguồn.
+    public async Task<object> CreateGroupAsync(GroupDto d)
+    {
+        var code = (d.GroupCode ?? "").Trim().ToUpperInvariant();
+        var name = (d.GroupName ?? "").Trim();
+        if (code.Length == 0) return new { ok = false, reason = "invalid_groupcode" };
+        if (await db.SysGroups.AnyAsync(x => x.OrgId == Org && x.GroupCode == code))
+            return new { ok = false, reason = "groupcode_exist", groupCode = code };
+        if (name.Length == 0) return new { ok = false, reason = "invalid_groupname" };
+
+        var g = new SysGroup { OrgId = Org, GroupCode = code, GroupName = name, FlagActive = true };
+        db.SysGroups.Add(g);
+        await db.SaveChangesAsync();
+        return new { ok = true, reason = "ok", group = new { g.GroupCode, g.GroupName, g.FlagActive } };
+    }
+
+    // ===== Sys_Group_Update (nguồn 2010.HTC) =====
+    // Cập nhật nhóm quyền (partial theo Ft_Cols_Upd) kèm kiểm tra ràng buộc giống nguồn:
+    //  (1) Sys_Group_CheckDB(Flag.Yes): nhóm phải TỒN TẠI, nếu không trả reason group_not_found;
+    //  (2) nếu cập nhật GroupName thì phải KHÁC RỖNG (Sys_Group_Update_InvalidGroupName);
+    //  (3) FlagActive cập nhật khi có trong Cols. Cols rỗng/null = cập nhật tất cả cột cho phép.
+    public async Task<object> UpdateGroupAsync(string groupCode, UpdateGroupDto d)
+    {
+        groupCode = (groupCode ?? "").Trim().ToUpperInvariant();
+        var g = await db.SysGroups.FirstOrDefaultAsync(x => x.OrgId == Org && x.GroupCode == groupCode);
+        if (g is null) return new { ok = false, reason = "group_not_found", groupCode };
+
+        // Ft_Cols_Upd: danh sách cột cần cập nhật (rỗng = tất cả). So khớp không phân biệt hoa/thường.
+        var cols = (d.Cols ?? new List<string>())
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim().ToUpperInvariant()).ToHashSet();
+        bool Upd(string col) => cols.Count == 0 || cols.Contains(col.ToUpperInvariant());
+
+        var name = (d.GroupName ?? "").Trim();
+        if (Upd("GroupName") && name.Length == 0)
+            return new { ok = false, reason = "invalid_groupname", groupCode };
+
+        if (Upd("GroupName")) g.GroupName = name;
+        if (Upd("FlagActive")) g.FlagActive = d.FlagActive ?? true;
+
+        await db.SaveChangesAsync();
+        return new { ok = true, reason = "ok", group = new { g.GroupCode, g.GroupName, g.FlagActive } };
+    }
+
+    // ===== Sys_Group_Delete (nguồn 2010.HTC) =====
+    // Xóa nhóm quyền kèm dọn thành viên giống nguồn:
+    //  (1) Sys_Group_CheckDB(Flag.Yes): nhóm phải TỒN TẠI, nếu không trả reason group_not_found;
+    //  (2) Sys_UserInGroup_Delete_ByGroup: xóa mọi dòng Sys_UserInGroup của nhóm;
+    //  (3) xóa dòng Sys_Group. Toàn bộ trong 1 thao tác (nguồn dùng transaction).
+    public async Task<DeleteGroupResult> DeleteGroupAsync(string groupCode)
+    {
+        groupCode = (groupCode ?? "").Trim().ToUpperInvariant();
+        var g = await db.SysGroups.FirstOrDefaultAsync(x => x.OrgId == Org && x.GroupCode == groupCode);
+        if (g is null) return new DeleteGroupResult(false, "group_not_found", groupCode, 0);
+
+        // Dọn thành viên nhóm (Sys_UserInGroup_Delete_ByGroup).
+        var members = await db.SysUserInGroups.Where(x => x.OrgId == Org && x.GroupCode == groupCode).ToListAsync();
+        db.SysUserInGroups.RemoveRange(members);
+
+        // Xóa nhóm (Sys_Group).
+        db.SysGroups.Remove(g);
+        await db.SaveChangesAsync();
+
+        return new DeleteGroupResult(true, "ok", groupCode, members.Count);
     }
 
     // Sys_UserInGroup_Save (nguồn 2010.HTC): thay TOÀN BỘ thành viên của nhóm trong 1 thao tác
