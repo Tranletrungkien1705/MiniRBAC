@@ -332,6 +332,17 @@ app.MapDelete("/api/users/{userKey}", async (string userKey, IRbacService svc) =
     return r.Ok ? Results.Ok(r) : Results.NotFound(r);
 }).RequireAuthorization();
 
+// ===== Sys_User_Get (nguồn 2010.HTC) =====
+// Tìm/liệt kê user có PHÂN TRANG (recordStart/recordCount) + lọc theo cột (userCode/dealerCode/deptCode/
+// viewAbilityType/flagSysAdmin/flagActive). Trả về danh sách Sys_User (mật khẩu CHE = "*********",
+// kèm tên đại lý), tùy chọn kèm Sys_UserInGroup (includeGroups) và Sys_UserInTeam (includeTeams),
+// cùng tổng số dòng khớp (myCount). Khác GET /api/users/{userKey}/current (chỉ 1 user hiện tại).
+app.MapGet("/api/users", async (string? userCode, string? dealerCode, string? deptCode, string? viewAbilityType,
+    bool? flagSysAdmin, bool? flagActive, int? recordStart, int? recordCount, bool? includeGroups, bool? includeTeams,
+    IRbacService svc) =>
+    Results.Ok(await svc.SearchUsersAsync(new UserSearchDto(userCode, dealerCode, deptCode, viewAbilityType,
+        flagSysAdmin, flagActive, recordStart, recordCount, includeGroups, includeTeams)))).RequireAuthorization();
+
 app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });

@@ -20,6 +20,7 @@ public record ViewAbilityDto(string UserCode, string? DealerCode, string? Dealer
 public record CreateUserDto(string UserCode, string? DealerCode, string? DeptCode, string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin);
 public record UpdateUserDto(string? UserStaffId, string? UserName, string? UserPassword, string? UserEmail, string? UserPhoneNo, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive, List<string>? Cols);
 public record DeleteUserResult(bool Ok, string Reason, string UserCode, int RemovedGroups, int RemovedTeams);
+public record UserSearchDto(string? UserCode, string? DealerCode, string? DeptCode, string? ViewAbilityType, bool? FlagSysAdmin, bool? FlagActive, int? RecordStart, int? RecordCount, bool? IncludeGroups, bool? IncludeTeams);
 
 public interface IRbacService
 {
@@ -84,6 +85,8 @@ public interface IRbacService
     Task<object> UpdateUserAsync(string userCode, UpdateUserDto d);
     // Sys_User_Delete (nguồn 2010.HTC): xóa hồ sơ user + dọn thành viên nhóm/đội của user
     Task<DeleteUserResult> DeleteUserAsync(string userCode);
+    // Sys_User_Get (nguồn 2010.HTC): tìm/liệt kê user có phân trang + tùy chọn kèm nhóm/đội, mật khẩu che
+    Task<object> SearchUsersAsync(UserSearchDto d);
 }
 
 public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacService
@@ -1071,5 +1074,100 @@ public sealed class RbacService(AppDbContext db, ITenantContext tenant) : IRbacS
         await db.SaveChangesAsync();
 
         return new DeleteUserResult(true, "ok", userCode, groups.Count, teams.Count);
+    }
+
+    // ===== Sys_User_Get (nguồn 2010.HTC) =====
+    // Tìm/liệt kê user có PHÂN TRANG (Ft_RecordStart/Ft_RecordCount) + lọc theo cột (Ft_WhereClause),
+    // trả về: (1) danh sách Sys_User (mật khẩu CHE bằng Default_PasswordMask = "*********",
+    // kèm tên đại lý qua Mst_Dealer); (2) tùy chọn Sys_UserInGroup (thành viên nhóm + tên nhóm);
+    // (3) tùy chọn Sys_UserInTeam (thành viên đội + tên đội); (4) tổng số dòng khớp (MyCount).
+    // Khác GetForCurrentUserAsync (chỉ 1 user hiện tại) — đây là màn danh sách/tìm kiếm user.
+    private const string DefaultPasswordMask = "*********";
+
+    public async Task<object> SearchUsersAsync(UserSearchDto d)
+    {
+        // Lọc theo cột (tương đương Ft_WhereClause của nguồn, đã chuẩn hóa về các cột cho phép).
+        var q = db.SysUserProfiles.Where(x => x.OrgId == Org);
+        if (!string.IsNullOrWhiteSpace(d.UserCode)) { var v = d.UserCode.Trim(); q = q.Where(x => x.UserCode == v); }
+        if (!string.IsNullOrWhiteSpace(d.DealerCode)) { var v = d.DealerCode.Trim().ToUpperInvariant(); q = q.Where(x => x.DealerCode == v); }
+        if (!string.IsNullOrWhiteSpace(d.DeptCode)) { var v = d.DeptCode.Trim().ToUpperInvariant(); q = q.Where(x => x.DeptCode == v); }
+        if (!string.IsNullOrWhiteSpace(d.ViewAbilityType)) { var v = d.ViewAbilityType.Trim().ToUpperInvariant(); q = q.Where(x => x.ViewAbilityType == v); }
+        if (d.FlagSysAdmin is not null) q = q.Where(x => x.FlagSysAdmin == d.FlagSysAdmin);
+        if (d.FlagActive is not null) q = q.Where(x => x.FlagActive == d.FlagActive);
+
+        var total = await q.CountAsync();
+
+        // Phân trang: Ft_RecordStart (0-based) + Ft_RecordCount. Mặc định lấy từ đầu, tối đa 100 dòng.
+        var start = d.RecordStart is > 0 ? d.RecordStart.Value : 0;
+        var count = d.RecordCount is > 0 ? d.RecordCount.Value : 100;
+
+        var users = await q.OrderBy(x => x.UserCode).Skip(start).Take(count)
+            .Select(x => new
+            {
+                x.UserCode, x.DealerCode, x.DeptCode, x.UserStaffId, x.UserName,
+                UserPassword = DefaultPasswordMask, // che mật khẩu — giống nguồn (Default_PasswordMask)
+                x.UserPhoneNo, x.UserEmail, x.ViewAbilityType, x.FlagSysAdmin, x.FlagActive
+            }).ToListAsync();
+
+        // Kèm tên đại lý (left join Mst_Dealer) — giống nguồn.
+        var dealerCodes = users.Select(u => u.DealerCode).Distinct().ToList();
+        var dealers = await db.MstDealers.Where(x => x.OrgId == Org && dealerCodes.Contains(x.DealerCode))
+            .Select(x => new { x.DealerCode, x.DealerName }).ToListAsync();
+        var dealerName = dealers.ToDictionary(x => x.DealerCode, x => x.DealerName, StringComparer.OrdinalIgnoreCase);
+        var userRows = users.Select(u => new
+        {
+            u.UserCode, u.DealerCode, u.DeptCode, u.UserStaffId, u.UserName, u.UserPassword,
+            u.UserPhoneNo, u.UserEmail, u.ViewAbilityType, u.FlagSysAdmin, u.FlagActive,
+            mdl_DealerCode = u.DealerCode,
+            mdl_DealerName = dealerName.TryGetValue(u.DealerCode, out var dn) ? dn : null
+        }).ToList();
+
+        var userCodes = users.Select(u => u.UserCode).ToList();
+
+        // (2) Sys_UserInGroup: thành viên nhóm của các user trong trang (kèm tên nhóm).
+        object? userInGroup = null;
+        if (d.IncludeGroups == true)
+        {
+            userInGroup = await (from uig in db.SysUserInGroups.Where(x => x.OrgId == Org && userCodes.Contains(x.UserCode))
+                                 join g in db.SysGroups.Where(x => x.OrgId == Org) on uig.GroupCode equals g.GroupCode into gj
+                                 from g in gj.DefaultIfEmpty()
+                                 orderby uig.UserCode
+                                 select new
+                                 {
+                                     uig.UserCode, uig.GroupCode,
+                                     sg_GroupCode = g != null ? g.GroupCode : null,
+                                     sg_GroupName = g != null ? g.GroupName : null,
+                                     sg_FlagActive = g != null ? (bool?)g.FlagActive : null
+                                 }).ToListAsync();
+        }
+
+        // (3) Sys_UserInTeam: thành viên đội của các user trong trang (kèm tên đội).
+        object? userInTeam = null;
+        if (d.IncludeTeams == true)
+        {
+            userInTeam = await (from uit in db.SysUserInTeams.Where(x => x.OrgId == Org && userCodes.Contains(x.UserCode))
+                                join t in db.SysUserTeams.Where(x => x.OrgId == Org)
+                                    on new { uit.TeamCode, uit.DealerCode } equals new { t.TeamCode, t.DealerCode } into tj
+                                from t in tj.DefaultIfEmpty()
+                                orderby uit.UserCode
+                                select new
+                                {
+                                    uit.UserCode, uit.TeamCode, uit.DealerCode,
+                                    sut_TeamCode = t != null ? t.TeamCode : null,
+                                    sut_TeamName = t != null ? t.TeamName : null,
+                                    sut_FlagActive = t != null ? (bool?)t.FlagActive : null
+                                }).ToListAsync();
+        }
+
+        return new
+        {
+            myCount = total,
+            recordStart = start,
+            recordCount = count,
+            count = userRows.Count,
+            users = userRows,
+            userInGroup,
+            userInTeam
+        };
     }
 }
